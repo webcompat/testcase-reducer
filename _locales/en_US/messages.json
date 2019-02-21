@@ -1,0 +1,56 @@
+{
+  "addonDescription": {
+    "message": "Helps with reducing markup and CSS for the purposes of generating test cases."
+  },
+  "addonName": {
+    "message": "Testcase Reducer"
+  },
+  "alsoIncludeAllMedias": {
+    "message": "Include all @media rules"
+  },
+  "alsoIncludeAncestors": {
+    "message": "Include ancestor nodes"
+  },
+  "alsoIncludeCSSFonts": {
+    "message": "Include CSS fonts"
+  },
+  "alsoIncludeMetas": {
+    "message": "Include important meta tags"
+  },
+  "alsoIncludePageRules": {
+    "message": "Include @page rules"
+  },
+  "alsoIncludeScripts": {
+    "message": "Include scripts"
+  },
+  "confirmLoseEdits": {
+    "message": "Lose your edits and re-reduce?"
+  },
+  "couldNotAccessInspectedNode": {
+    "message": "Could not access inspected node... cross-origin iframe?"
+  },
+  "errorUnexpectedCSSRule": {
+    "message": "Testcase Reducer found an unexpected CSS rule:"
+  },
+  "showSameViewportSize": {
+    "message": "Show iframe with original viewport size"
+  },
+  "openInCodePen": {
+    "message": "Send to CodePen"
+  },
+  "openInJSBin": {
+    "message": "Send to JSBin"
+  },
+  "openInJSFiddle": {
+    "message": "Send to JSFiddle"
+  },
+  "openInNewTab": {
+    "message": "Open in a new tab"
+  },
+  "reduce": {
+    "message": "Reduce"
+  },
+  "reducedTestCase": {
+    "message": "Reduced test case for $1"
+  }
+}

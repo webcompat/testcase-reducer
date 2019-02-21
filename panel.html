@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this file,
+   - You can obtain one at http://mozilla.org/MPL/2.0/. -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="css-selector-parser.js"></script>
+  <script src="reduceNode.js"></script>
+  <script src="panel.js"></script>
+  <link href="panel.css" rel="stylesheet"></link>
+</head>
+<body>
+  <div id="controls">
+    <button id="reduce"></button>
+    <label id="alsoIncludeAncestors"><input type="checkbox" checked></label>
+    <label id="alsoIncludeCSSFonts"><input type="checkbox" checked></label>
+    <label id="alsoIncludeAllMedias"><input type="checkbox" checked></label>
+    <label id="alsoIncludeMetas"><input type="checkbox" checked></label>
+    <label id="alsoIncludePageRules"><input type="checkbox"></label>
+    <label id="alsoIncludeScripts"><input type="checkbox"></label>
+  </div>
+  <div id="exports">
+    <label id="showSameViewportSize"><input type="checkbox"></label>
+    <div class="flexSpace"></div>
+    <button id="openInCodepen" disabled></button>
+    <button id="openInJSBin" disabled></button>
+    <button id="openInJSFiddle" disabled></button>
+    <button id="openInNewTab" disabled></button>
+  </div>
+  <textarea placeholder="Reduced test-case"></textarea>
+  <div id="preview">
+    <iframe srcdoc="Preview"></iframe>
+  </div>
+</body>
+</html>

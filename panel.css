@@ -1,0 +1,52 @@
+* {
+  padding: 0;
+  margin: 0;
+}
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  width: 100%;
+}
+body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: fit-content(100%);
+}
+#controls,
+#exports {
+  padding: 4px;
+}
+textarea,
+#preview {
+  border-color: #000;
+  border-style: solid;
+  border-width: 1px 0 0 0;
+}
+#exports {
+  display: flex;
+}
+#exports > button {
+  margin-left: 4px;
+}
+.flexSpace {
+  flex-grow: 1;
+}
+#preview {
+  background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUAQMAAAC3R49OAAAABlBMVEXv7+////9mUzfqAAAAFElEQVQIW2NksN/ISAz+f9CBGAwAxtEddZlnB4IAAAAASUVORK5CYII=");
+  overflow: auto;
+}
+textarea {
+  border-right-width: 1px;
+  padding: 4px;
+  resize: none;
+}
+iframe {
+  background: #fff;
+  border: 0;
+}
+label > input {
+  margin-right: 0.5em;
+  position: relative;
+  top: 0.25em;
+}
