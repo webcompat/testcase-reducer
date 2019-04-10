@@ -154,12 +154,21 @@ function openMarkupUsingSite(markup, title, site) {
       `;
   }
 
-  chrome.tabs.create({url}, ({id}) => {
-    chrome.tabs.executeScript(id, {
-      code,
-      runAt: "document_idle",
+  // Chrome allows data: URIs but does not allow executeScript on chrome-extension: pages.
+  // Firefox allows the latter, but not the former.
+  if (typeof browser !== "undefined") {
+    chrome.tabs.create({url}, ({id}) => {
+      chrome.tabs.executeScript(id, {
+        code,
+        runAt: "document_idle",
+      });
     });
-  });
+  } else {
+    const doctype = isQuirksMode ? "" : "<!DOCTYPE html>";
+    const encodedMarkup = btoa(`${doctype}${markup}`);
+    const data = `data:text/html;base64,${encodedMarkup}`;
+    chrome.tabs.create({url: data});
+  }
 }
 
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {

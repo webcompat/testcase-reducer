@@ -7,9 +7,7 @@
 /* global chrome */
 
 chrome.devtools.panels.create(
-  browser.i18n.getMessage("addonName"),
+  chrome.i18n.getMessage("addonName"),
   "icon.svg",
-  "panel.html",
-  panel => {
-  }
+  "panel.html"
 );

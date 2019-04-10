@@ -1,0 +1,28 @@
+{
+  "name": "__MSG_addonName__",
+  "description": "__MSG_addonDescription__",
+  "default_locale": "en_US",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "homepage_url": "https://github.com/webcompat/testcase-reducer",
+  "icons": {
+    "16": "icon.svg",
+    "32": "icon.svg",
+    "48": "icon.svg",
+    "96": "icon.svg",
+    "128": "icon.svg"
+  },
+  "devtools_page": "devtools.html",
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "permissions": [
+    "<all_urls>",
+    "webNavigation",
+    "https://codepen.io/*",
+    "https://jsbin.com/*",
+    "https://jsfiddle.net/*"
+  ]
+}
