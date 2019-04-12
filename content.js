@@ -15,16 +15,16 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
   // inspected node on the content script for us.  Other browsers have to store
   // it on the actual page for us to read here (we should unset it now, too).
   const requestId = msg.reduceRequest.id;
-  const node = window.inspectedNode || document.querySelector("[__inspectedNode__]");
+  const node = window.inspectedNode ||
+               (window.wrappedJSObject && window.wrappedJSObject[chrome.runtime.id]);
   if (!node) {
     chrome.runtime.sendMessage({requestId}, () => { chrome.runtime.lastError; });
     return;
   }
-  node.removeAttribute("__inspectedNode__");
+  delete window[chrome.runtime.id];
   reduceNode(node, msg.reduceRequest).then(result => {
     chrome.runtime.sendMessage({requestId, result}, () => { chrome.runtime.lastError; });
   }, error => {
-console.error(error);
     chrome.runtime.sendMessage({requestId, error}, () => { chrome.runtime.lastError; });
   });
 });

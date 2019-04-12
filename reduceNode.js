@@ -6,7 +6,7 @@
 
 /* globals CSSMozDocumentRule, CssSelectorParser */
 
-const SelectorParser = new CssSelectorParser();
+var SelectorParser = new CssSelectorParser(); // eslint-disable-line no-var
 SelectorParser.registerSelectorPseudos("lang", "dir", "host", "host-context", "is", "where", "has", "contains", "not");
 SelectorParser.registerNumericPseudos("nth-child", "nth-last-child", "nth-col", "nth-last-col", "nth-of-type", "nth-last-of-type");
 SelectorParser.registerNestingOperators(">", "+", "~");
@@ -244,28 +244,118 @@ function reduceNode(node, settings) {
       const newFinalDocument = node.cloneNode(false);
       newFinalDocument.appendChild(finalDocument);
       finalDocument = newFinalDocument;
-      finalDocument.prepend(document.createTextNode("\n"));
-      finalDocument.appendChild(document.createTextNode("\n"));
+      try {
+        finalDocument.prepend(document.createTextNode("\n"));
+        finalDocument.appendChild(document.createTextNode("\n"));
+      } catch (_) {
+      }
     }
+
+    function findOutermostUseElement(node) {
+      let outermost;
+      while (node) {
+        if (node instanceof SVGUseElement) {
+          outermost = node;
+        }
+        node = node.parentNode;
+        if (node instanceof ShadowRoot) {
+          node = node.host;
+        }
+      }
+      return outermost;
+    }
+
+    node = findOutermostUseElement(node) || node;
 
     // If desired, we also consider the focused node's ancestors.
     let finalDocument = node.cloneNode(true);
-    while (node.parentElement) {
-      node = node.parentElement;
-      if ((!alsoIncludeAncestors && node.nodeName === "BODY") ||
-           (alsoIncludeAncestors && node.nodeName !== "HTML")) {
+    while (!(node.parentNode instanceof Document)) {
+      node = node.parentNode;
+      if (node && node instanceof ShadowRoot) {
+        node = node.host;
+      }
+      if (alsoIncludeAncestors || (node instanceof HTMLBodyElement ||
+                                   node instanceof SVGSVGElement)) {
         alsoConsider(node);
       }
     }
 
     // node is now the <html> element, which we always need to consider and add.
     alsoConsider(node);
-    const doctypeNode = node.parentNode.doctype;
+    const doctypeNode = document.doctype;
     const doctype = doctypeNode ? `${doctypeToString(doctypeNode)}\n` : "";
     const viewport = {
       width: window.innerWidth,
       height: window.innerHeight,
     };
+
+    const mockUseInstances = [];
+    const usedDefs = [];
+    const memoizedUseReferences = new Map();
+
+    function isValidSVGUseReference(elem) {
+      if (memoizedUseReferences.has(elem)) {
+        return memoizedUseReferences.get(elem);
+      }
+
+      // As per https://www.w3.org/TR/SVG2/struct.html#UseElement,
+      // "If the referenced element that results from resolving the URL is neither
+      // an SVG element nor an HTML-namespaced element that may be included as a
+      // child of an SVG container element, then the reference is invalid"
+      if (!(elem instanceof SVGElement ||
+            elem instanceof HTMLVideoElement ||
+            elem instanceof HTMLAudioElement ||
+            elem instanceof HTMLIFrameElement ||
+            elem instanceof HTMLCanvasElement)) {
+        memoizedUseReferences.set(elem, false);
+        return false;
+      }
+
+      // "If the referenced element is a (shadow-including) ancestor of the ‘use’
+      // element, then this is an invalid circular reference"
+      while (elem) {
+        if (elem instanceof ShadowRoot) {
+          memoizedUseReferences.set(elem, false);
+          return false;
+        }
+        elem = elem.parentNode;
+      }
+      memoizedUseReferences.set(elem, true);
+      return true;
+    }
+
+    function mockInstantiateUseElement(use, addToList = true) {
+      if (!use.href) {
+        return;
+      }
+      const base = document.querySelector(use.href.baseVal);
+      const anim = document.querySelector(use.href.animVal);
+      if (base && isValidSVGUseReference(base)) {
+        usedDefs.push(base);
+        const inst = base.cloneNode(true);
+        if (addToList) {
+          mockUseInstances.push(inst);
+        }
+        use.appendChild(inst);
+      }
+      if (anim && anim !== base && isValidSVGUseReference(anim)) {
+        usedDefs.push(anim);
+        const inst = anim.cloneNode(true);
+        if (addToList) {
+          mockUseInstances.push(inst);
+        }
+        use.appendChild(inst);
+      }
+      for (const subuse of use.querySelectorAll("use")) {
+        mockInstantiateUseElement(subuse, false);
+      }
+    }
+
+    // Mock-instantiate use elements, so our CSS matcher can match them.
+    // Also note which <defs> they use.
+    for (const use of finalDocument.querySelectorAll("use")) {
+      mockInstantiateUseElement(use);
+    }
 
     // Put all CSS text matching the desired nodes into a <style> tag.
     const css = `\n${await getCSSTextApplyingTo(finalDocument,
@@ -273,13 +363,48 @@ function reduceNode(node, settings) {
                                                 alsoIncludeCSSFonts,
                                                 alsoIncludePageRules)}\n`;
 
+    // We no longer need the fake use instances, so remove them so they
+    // do not end up in our final "reduced" markup
+    for (const inst of mockUseInstances) {
+      inst.remove();
+    }
+
     // Filter out any <style> (and maybe <script>) tags we've dragged along.
-    const toFilter = alsoIncludeScripts ? "style" : "script, style";
-    finalDocument.querySelectorAll(toFilter).forEach(node => node.remove());
+    const toFilter = alsoIncludeScripts ? "style, link[rel=stylesheet]" :
+                                          "script, style, link[rel=stylesheet]";
+    for (const elem of finalDocument.querySelectorAll(toFilter)) {
+      elem.remove();
+    }
 
     const head = document.createElement("head");
     finalDocument.prepend(head);
     finalDocument.prepend(document.createTextNode("\n"));
+
+    // Note any <defs> being used via SVG url() properties.
+    for (const attr of ["fill", "clip-path", "cursor", "filter", "marker-end",
+                        "marker-mid", "marker-start"]) {
+      for (const elem of document.querySelectorAll(`[${attr}]`)) {
+        const url = (elem.getAttribute(attr).match(/url\((.*)\)/) || [])[1];
+        if (url && url.startsWith("#") && elem instanceof SVGElement) {
+          const ref = document.querySelector(url);
+          if (ref) {
+            usedDefs.push(ref);
+          }
+        }
+      }
+    }
+
+    // Copy over any <defs> that we need
+    if (usedDefs.length) {
+      const s = document.createElement("svg");
+      s.style = "z-index:-1; position:absolute; width:0; height:0";
+      head.appendChild(s);
+      const d = document.createElement("defs");
+      s.appendChild(d);
+      for (const def of usedDefs) {
+        d.appendChild(def.cloneNode(true));
+      }
+    }
 
     // Copy over any <meta> viewport, charset, or encoding directives.
     if (alsoIncludeMetas) {
@@ -319,14 +444,14 @@ function reduceNode(node, settings) {
     head.appendChild(document.createTextNode("\n"));
 
     // Fully-qualify all the URLs that we can.
-    finalDocument.querySelectorAll("[srcset]").forEach(node => {
+    for (const node of finalDocument.querySelectorAll("[srcset]")) {
       node.setAttribute("srcset", fullyQualifySrcSetURLs(node.getAttribute("srcset")));
-    });
+    }
 
     for (const attr of ["action", "src", "href"]) {
-      finalDocument.querySelectorAll(`[${attr}]`).forEach(node => {
+      for (const node of finalDocument.querySelectorAll(`:not(use)[${attr}]`)) {
         node.setAttribute(attr, fullyQualifyURL(node.getAttribute(attr)));
-      });
+      }
     }
 
     return {
@@ -336,5 +461,10 @@ function reduceNode(node, settings) {
     };
   }
 
-  return reduce(node, settings);
+  try {
+    return reduce(node, settings);
+  } catch (error) {
+    console.error(error);
+    return {error};
+  }
 }

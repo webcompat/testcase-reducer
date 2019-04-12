@@ -87,14 +87,8 @@ function storeInspectedNodeOnContentScript() {
   window.inspectedNode = $0;
 }
 
-function storeInspectedNodeOnPageScript() {
-  try {
-    $0.setAttribute("__inspectedNode__", "");
-  } catch (_) {
-    console.error(_);
-    return true;
-  }
-  return false;
+function storeInspectedNodeOnPageScript(id) {
+  window[id] = $0;
 }
 
 function runReductionInContentScript(reduceRequest) {
@@ -153,7 +147,7 @@ async function reduceInspectorSelection() {
       if (error.message.includes("useContentScriptContext")) {
         // Firefox just uses the content script by default, so no issue there.
         chrome.devtools.inspectedWindow.eval(
-          `(${storeInspectedNodeOnPageScript})()`,
+          `(${storeInspectedNodeOnPageScript})(${JSON.stringify(chrome.runtime.id)})`,
           error => {
             if (error) {
               updateUI(chrome.i18n.getMessage("couldNotAccessInspectedNode"));
