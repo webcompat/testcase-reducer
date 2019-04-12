@@ -39,8 +39,12 @@ function reduceNode(node, settings) {
   }
 
   const docHref = location.href;
+
+  const referencedInternalLinks = new Set();
+
   function fullyQualifyURL(url, baseUrl = docHref) {
     if (url.startsWith("#")) {
+      referencedInternalLinks.add(url);
       return url;
     }
     try {
@@ -133,7 +137,7 @@ function reduceNode(node, settings) {
       } else if (rule instanceof CSSImportRule) {
         const sheet = await getUsableStylesheet(rule.styleSheet);
         if (sheet) {
-          replaceCSSUrl.baseUrl = sheet.baseUrl;
+          replaceCSSUrl.baseUrl = sheet.href;
           for (const rule of sheet.cssRules) {
             await processRule(rule);
           }
@@ -189,7 +193,7 @@ function reduceNode(node, settings) {
     for (const srcSheet of sheets) {
       const sheet = await getUsableStylesheet(srcSheet);
       if (sheet) {
-        replaceCSSUrl.baseUrl = sheet.baseUrl;
+        replaceCSSUrl.baseUrl = sheet.href;
         for (const rule of sheet.cssRules) {
           await processRule(rule);
         }
@@ -239,7 +243,7 @@ function reduceNode(node, settings) {
              (systemId ? " \"" + systemId + '"' : "") + ">";
   }
 
-  async function reduce(node, settings = {}) {
+  async function reduce(node, settings = {}) { // eslint-disable-line complexity
     const {alsoIncludeAllMedias, alsoIncludeAncestors, alsoIncludeCSSFonts,
            alsoIncludeMetas, alsoIncludePageRules, alsoIncludeScripts} = settings;
 
@@ -396,11 +400,22 @@ function reduceNode(node, settings) {
         }
       }
     }
+    // Note any <defs> being used via CSS clip-path URLs and the like.
+    for (const href of referencedInternalLinks) {
+      if (finalDocument.querySelector(href)) {
+        continue;
+      }
+      const src = document.querySelector(href);
+      if (src && src instanceof SVGElement) {
+        usedDefs.push(src);
+      }
+    }
 
     // Copy over any <defs> that we need
     if (usedDefs.length) {
       const s = document.createElement("svg");
-      s.style = "z-index:-1; position:absolute; width:0; height:0";
+      s.width = "0";
+      s.height = "0";
       head.appendChild(s);
       const d = document.createElement("defs");
       s.appendChild(d);
