@@ -40,6 +40,9 @@ function reduceNode(node, settings) {
 
   const docHref = location.href;
   function fullyQualifyURL(url, baseUrl = docHref) {
+    if (url.startsWith("#")) {
+      return url;
+    }
     try {
       return new URL(url, baseUrl).href;
     } catch (e) {
