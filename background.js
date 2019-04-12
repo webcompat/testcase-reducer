@@ -165,7 +165,7 @@ function openMarkupUsingSite(markup, title, site) {
     });
   } else {
     const doctype = isQuirksMode ? "" : "<!DOCTYPE html>";
-    const encodedMarkup = btoa(`${doctype}${markup}`);
+    const encodedMarkup = btoa(unescape(encodeURIComponent(`${doctype}${markup}`)));
     const data = `data:text/html;base64,${encodedMarkup}`;
     chrome.tabs.create({url: data});
   }
