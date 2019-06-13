@@ -50,6 +50,9 @@
   "reduce": {
     "message": "Reduce"
   },
+  "beautify": {
+    "message": "Beautify"
+  },
   "reducedTestCase": {
     "message": "Reduced test case for $1"
   }

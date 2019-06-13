@@ -6,9 +6,14 @@
 
 // TODO: a way to reduce test-cases on Android.
 
-/* global $0 */
+/* global $0, html_beautify */
 
 document.addEventListener("DOMContentLoaded", startup);
+
+const BEAUTIFY_CONFIG = {
+  indent_size: 2,
+  space_in_empty_paren: true,
+};
 
 let textAreaModified = false;
 
@@ -22,6 +27,8 @@ function startup() {
     const {id} = target;
     if (id === "reduce") {
       reduceInspectorSelection();
+    } else if (id === "beautify") {
+      beautify();
     } else if (id.startsWith("openIn")) {
       openInNewTab(id.substr(6));
     }
@@ -56,6 +63,7 @@ function startup() {
     "openInJSBin",
     "openInJSFiddle",
     "openInNewTab",
+    "beautify",
     "reduce",
     "showSameViewportSize",
   ]) {
@@ -103,6 +111,11 @@ function runReductionInContentScript(reduceRequest) {
       updateUI(html, viewport, title);
     }
   });
+}
+
+function beautify() {
+  const ta = document.querySelector("textarea");
+  ta.value = html_beautify(ta.value, BEAUTIFY_CONFIG);
 }
 
 async function reduceInspectorSelection() {
