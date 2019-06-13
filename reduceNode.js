@@ -275,6 +275,7 @@ function reduceNode(node, settings) {
     node = findOutermostUseElement(node) || node;
 
     // If desired, we also consider the focused node's ancestors.
+    const topLevelHTMLWasSelected = node.parentNode instanceof Document;
     let finalDocument = node.cloneNode(true);
     while (!(node.parentNode instanceof Document)) {
       node = node.parentNode;
@@ -288,7 +289,9 @@ function reduceNode(node, settings) {
     }
 
     // node is now the <html> element, which we always need to consider and add.
-    alsoConsider(node);
+    if (!topLevelHTMLWasSelected) {
+      alsoConsider(node);
+    }
     const doctypeNode = document.doctype;
     const doctype = doctypeNode ? `${doctypeToString(doctypeNode)}\n` : "";
     const viewport = {
@@ -376,9 +379,9 @@ function reduceNode(node, settings) {
       inst.remove();
     }
 
-    // Filter out any <style> (and maybe <script>) tags we've dragged along.
-    const toFilter = alsoIncludeScripts ? "style, link[rel=stylesheet]" :
-                                          "script, style, link[rel=stylesheet]";
+    // Filter out any <head>, <style> (and maybe <script>) tags we've dragged along.
+    const toFilter = alsoIncludeScripts ? "head, style, link[rel=stylesheet]" :
+                                          "head, script, style, link[rel=stylesheet]";
     for (const elem of finalDocument.querySelectorAll(toFilter)) {
       elem.remove();
     }
