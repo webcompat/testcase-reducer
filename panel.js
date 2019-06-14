@@ -136,7 +136,8 @@ function refine() {
       cleanup();
       return;
     }
-    ta.value = reduceNode(iframe.contentDocument.documentElement).
+    ta.value = reduceNode(iframe.contentDocument.documentElement,
+                          getCurrentlySelectedOptions()).
                 then(result => handleReductionResult({result}),
                      error => handleReductionResult({error})).
                 then(cleanup);
@@ -149,14 +150,8 @@ function beautify() {
   ta.value = html_beautify(ta.value, BEAUTIFY_CONFIG);
 }
 
-async function reduceInspectorSelection() {
-  if (textAreaModified && !await confirmLoseEdits()) {
-    return;
-  }
-
-  const tabId = chrome.devtools.inspectedWindow.tabId;
-  const reduceRequest = {
-    tabId,
+function getCurrentlySelectedOptions() {
+  return {
     alsoIncludeAllMedias: document.querySelector("#alsoIncludeAllMedias > input").checked,
     alsoIncludeAncestors: document.querySelector("#alsoIncludeAncestors > input").checked,
     alsoIncludeCSSFonts: document.querySelector("#alsoIncludeCSSFonts > input").checked,
@@ -164,6 +159,17 @@ async function reduceInspectorSelection() {
     alsoIncludePageRules: document.querySelector("#alsoIncludePageRules > input").checked,
     alsoIncludeScripts: document.querySelector("#alsoIncludeScripts > input").checked,
   };
+}
+
+async function reduceInspectorSelection() {
+  if (textAreaModified && !await confirmLoseEdits()) {
+    return;
+  }
+
+  const tabId = chrome.devtools.inspectedWindow.tabId;
+  const reduceRequest = Object.assign(getCurrentlySelectedOptions(), {
+    tabId,
+  });
 
   // First we ensure our content scripts are started with our reducing code.
   chrome.runtime.sendMessage({ensureContentScriptInTabId: tabId}, error => {
