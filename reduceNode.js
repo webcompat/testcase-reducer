@@ -42,7 +42,7 @@ function reduceNode(node, settings) {
 
   const referencedInternalLinks = new Set();
 
-  function fullyQualifyURL(url, baseUrl: {
+  function fullyQualifyURL(url, baseUrl) {
     baseUrl = baseUrl || docHref;
     if (url.startsWith("#")) {
       referencedInternalLinks.add(url);
