@@ -124,7 +124,7 @@ function reduceNode(node, settings) {
 
   const haveMozDocumentRule = !!window.CSSMozDocumentRule;
 
-  async function getCSSTextApplyingTo(finalDocument, alsoIncludeAllMedias,
+  async function getCSSTextApplyingTo(wndw, sheets, finalDocument, alsoIncludeAllMedias,
                                       alsoIncludeCSSFonts, alsoIncludePageRules) {
     const candidateRules = [];
     async function processRule(rule) {
@@ -148,7 +148,7 @@ function reduceNode(node, settings) {
                                      rule.name));
       } else if (rule instanceof CSSMediaRule) {
         if (alsoIncludeAllMedias ||
-            window.matchMedia(rule.conditionText).matches) {
+            wndw.matchMedia(rule.conditionText).matches) {
           const matches = getSubruleMatches(rule, finalDocument);
           if (matches.length) {
             const finalRuleText = `@media ${rule.conditionText} {
@@ -189,7 +189,6 @@ function reduceNode(node, settings) {
         console.error(chrome.i18n.getMessage("errorUnexpectedCSSRule"), rule);
       }
     }
-    const sheets = [].slice.call(document.styleSheets || []);
     for (const srcSheet of sheets) {
       const sheet = await getUsableStylesheet(srcSheet);
       if (sheet) {
@@ -289,14 +288,16 @@ function reduceNode(node, settings) {
     }
 
     // node is now the <html> element, which we always need to consider and add.
+    const wndw = node.parentNode.defaultView;
+    const sheets = [].slice.call(node.parentNode.styleSheets || []);
     if (!topLevelHTMLWasSelected) {
       alsoConsider(node);
     }
     const doctypeNode = document.doctype;
     const doctype = doctypeNode ? `${doctypeToString(doctypeNode)}\n` : "";
     const viewport = {
-      width: window.innerWidth,
-      height: window.innerHeight,
+      width: wndw.innerWidth,
+      height: wndw.innerHeight,
     };
 
     const mockUseInstances = [];
@@ -368,7 +369,7 @@ function reduceNode(node, settings) {
     }
 
     // Put all CSS text matching the desired nodes into a <style> tag.
-    const css = `\n${await getCSSTextApplyingTo(finalDocument,
+    const css = `\n${await getCSSTextApplyingTo(wndw, sheets, finalDocument,
                                                 alsoIncludeAllMedias,
                                                 alsoIncludeCSSFonts,
                                                 alsoIncludePageRules)}\n`;

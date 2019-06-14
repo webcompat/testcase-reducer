@@ -50,6 +50,12 @@
   "reduce": {
     "message": "Reduce"
   },
+  "refine": {
+    "message": "Refine"
+  },
+  "couldNotRefine": {
+    "message": "Could not refine"
+  },
   "beautify": {
     "message": "Beautify"
   },

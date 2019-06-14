@@ -6,7 +6,7 @@
 
 // TODO: a way to reduce test-cases on Android.
 
-/* global $0, html_beautify */
+/* global $0, html_beautify, reduceNode */
 
 document.addEventListener("DOMContentLoaded", startup);
 
@@ -27,6 +27,8 @@ function startup() {
     const {id} = target;
     if (id === "reduce") {
       reduceInspectorSelection();
+    } else if (id === "refine") {
+      refine();
     } else if (id === "beautify") {
       beautify();
     } else if (id.startsWith("openIn")) {
@@ -65,6 +67,7 @@ function startup() {
     "openInNewTab",
     "beautify",
     "reduce",
+    "refine",
     "showSameViewportSize",
   ]) {
     document.querySelector(`#${label}`).
@@ -100,17 +103,45 @@ function storeInspectedNodeOnPageScript(id) {
 }
 
 function runReductionInContentScript(reduceRequest) {
-  chrome.runtime.sendMessage({reduceRequest}, ({result, error}) => {
-    textAreaModified = false;
-    if (error || result.error) {
-      updateUI(error || result.error);
-    } else {
-      const {html, url, viewport} = result;
-      document.querySelector("textarea").value = html;
-      const title = chrome.i18n.getMessage("reducedTestCase", url);
-      updateUI(html, viewport, title);
+  chrome.runtime.sendMessage({reduceRequest}, handleReductionResult);
+}
+
+function handleReductionResult({result, error}) {
+  textAreaModified = false;
+  if (error || result.error) {
+    updateUI(error || result.error);
+  } else {
+    const {html, url, viewport} = result;
+    document.querySelector("textarea").value = html;
+    const title = chrome.i18n.getMessage("reducedTestCase", url);
+    updateUI(html, viewport, title);
+    for (const button of document.querySelectorAll("#beautify, #refine")) {
+      button.removeAttribute("disabled");
     }
-  });
+  }
+}
+
+function refine() {
+  const ta = document.querySelector("textarea");
+  const iframe = document.createElement("iframe");
+  iframe.style.width = `${currentIFrameViewportSize.width}px`;
+  iframe.style.height = `${currentIFrameViewportSize.height}px`;
+  iframe.style.position = "absolute";
+  iframe.style.overflow = "auto";
+  iframe.srcdoc = ta.value;
+  const cleanup = () => { iframe.remove(); };
+  iframe.onload = () => {
+    if (!iframe.contentDocument) {
+      updateUI(chrome.i18n.getMessage("couldNotRefine"));
+      cleanup();
+      return;
+    }
+    ta.value = reduceNode(iframe.contentDocument.documentElement).
+                then(result => handleReductionResult({result}),
+                     error => handleReductionResult({error})).
+                then(cleanup);
+  };
+  document.body.appendChild(iframe);
 }
 
 function beautify() {
