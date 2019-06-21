@@ -114,7 +114,7 @@ function getJSFiddleCM() {
                   querySelector(".CodeMirror");
 }
 
-function openMarkupUsingSite(markup, title, site) {
+function openMarkupUsingSite(markup, title, site, originalURL) {
   const parsed = new DOMParser().parseFromString(markup, "text/html");
   const isQuirksMode = parsed.compatMode !== "CSS1Compat";
 
@@ -146,29 +146,52 @@ function openMarkupUsingSite(markup, title, site) {
       break;
 
     case "NewTab":
-      url = chrome.runtime.getURL(isQuirksMode ? "preview_quirks.html" :
-                                                 "preview_standards.html");
-      code = `
-        window.postMessage(${JSON.stringify({markup, title})});
-        undefined;
-      `;
+      if (typeof browser !== "undefined") {
+        code = `
+          window.stop();
+
+          const parsed = new DOMParser().parseFromString(${JSON.stringify(markup)}, "text/html");
+
+          // We're not allowed to replace the document entirely, so we have to
+          // make do with just changing its inner HTML (without using innerHTML).
+          while (document.documentElement.childNodes.length) {
+            document.documentElement.childNodes[0].remove();
+          }
+          while (parsed.documentElement.childNodes.length) {
+            document.documentElement.appendChild(parsed.documentElement.childNodes[0]);
+          }
+
+          // Then we can also copy over the attributes meant for the <html> element.
+          for (const attr of [].slice.call(parsed.documentElement.attributes)) {
+            try {
+              document.documentElement.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+            } catch (e) {
+            }
+          }
+
+          document.title = ${JSON.stringify(title)};
+        `;
+        chrome.tabs.create({url: originalURL}, ({id}) => {
+          chrome.tabs.executeScript(id, {
+            code,
+            runAt: "document_start",
+          });
+        });
+      } else {
+        const doctype = isQuirksMode ? "" : "<!DOCTYPE html>";
+        const encodedMarkup = btoa(unescape(encodeURIComponent(`${doctype}${markup}`)));
+        const data = `data:text/html;base64,${encodedMarkup}`;
+        chrome.tabs.create({url: data});
+      }
+      return;
   }
 
-  // Chrome allows data: URIs but does not allow executeScript on chrome-extension: pages.
-  // Firefox allows the latter, but not the former.
-  if (typeof browser !== "undefined") {
-    chrome.tabs.create({url}, ({id}) => {
-      chrome.tabs.executeScript(id, {
-        code,
-        runAt: "document_idle",
-      });
+  chrome.tabs.create({url}, ({id}) => {
+    chrome.tabs.executeScript(id, {
+      code,
+      runAt: "document_idle",
     });
-  } else {
-    const doctype = isQuirksMode ? "" : "<!DOCTYPE html>";
-    const encodedMarkup = btoa(unescape(encodeURIComponent(`${doctype}${markup}`)));
-    const data = `data:text/html;base64,${encodedMarkup}`;
-    chrome.tabs.create({url: data});
-  }
+  });
 }
 
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
@@ -181,7 +204,7 @@ chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
     ensureContentScriptInTabId(msg.ensureContentScriptInTabId, sendResponse);
     return true;
   } else if (msg.markup) {
-    openMarkupUsingSite(msg.markup, msg.title, msg.site);
+    openMarkupUsingSite(msg.markup, msg.title, msg.site, msg.url);
   }
   return false;
 });

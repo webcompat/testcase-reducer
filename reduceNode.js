@@ -479,7 +479,7 @@ function reduceNode(node, settings) {
 
     return {
       html: `${doctype}${finalDocument.outerHTML}`,
-      url: location.host,
+      url: location.href,
       viewport,
     };
   }

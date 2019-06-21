@@ -113,8 +113,9 @@ function handleReductionResult({result, error}) {
   } else {
     const {html, url, viewport} = result;
     document.querySelector("textarea").value = html;
-    const title = chrome.i18n.getMessage("reducedTestCase", url);
-    updateUI(html, viewport, title);
+    const {host} = new URL(url);
+    const title = chrome.i18n.getMessage("reducedTestCase", host);
+    updateUI(html, viewport, title, url);
     for (const button of document.querySelectorAll("#beautify, #refine")) {
       button.removeAttribute("disabled");
     }
@@ -234,9 +235,10 @@ function updateIFrameViewportSize(viewport) {
 }
 
 let currentReducedDocument;
+let currentReducedDocumentOriginalURL;
 let currentReducedDocumentTitle;
 
-function updateUI(_markup, viewport, title) {
+function updateUI(_markup, viewport, title, url) {
   const markup = typeof _markup === "string" ? _markup : document.querySelector("textarea").value;
 
   const iframe = document.querySelector("iframe");
@@ -244,6 +246,7 @@ function updateUI(_markup, viewport, title) {
   updateIFrameViewportSize(viewport);
 
   currentReducedDocument = markup;
+  currentReducedDocumentOriginalURL = url;
   currentReducedDocumentTitle = title;
   document.querySelectorAll("#exports button").forEach(button => {
     button.disabled = false;
@@ -258,5 +261,6 @@ function openInNewTab(site) {
     site,
     markup: currentReducedDocument,
     title: currentReducedDocumentTitle,
+    url: currentReducedDocumentOriginalURL,
   });
 }
