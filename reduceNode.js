@@ -112,12 +112,38 @@ function reduceNode(node, settings) {
     }
   }
 
+  function getPotentiallyUsedRuleParts(rule, finalDocument) {
+    const filteredSelectorText = filterCSSPseudos(rule.selectorText);
+    if (!finalDocument.matches(filteredSelectorText) &&
+        !finalDocument.querySelector(filteredSelectorText)) {
+      return undefined;
+    }
+
+    const originalSelectors = rule.selectorText;
+    const restOfRule = rule.cssText.replace(originalSelectors, "");
+    const parsed = SelectorParser.parse(originalSelectors);
+    const matchingSelectors = [];
+    const candidateSelectors = parsed.selectors || [parsed];
+    for (const parsedSelector of candidateSelectors) {
+      const selector = SelectorParser.render(parsedSelector);
+      const filteredSelector = filterCSSPseudos(selector);
+      if (finalDocument.matches(filteredSelector) ||
+          finalDocument.querySelector(filteredSelector)) {
+        matchingSelectors.push(selector);
+      }
+    }
+    if (matchingSelectors.length) {
+      return `${matchingSelectors.join(", ")}${restOfRule}`;
+    }
+    return undefined;
+  }
+
   function getSubruleMatches(rule, finalDocument) {
     const matches = [];
     for (const subrule of rule.cssRules) {
-      const selectorText = filterCSSPseudos(subrule.selectorText);
-      if (finalDocument.querySelector(selectorText)) {
-        matches.push(fullyQualifyCSSUrls(subrule.cssText));
+      const finalCSSText = getPotentiallyUsedRuleParts(subrule, finalDocument);
+      if (finalCSSText) {
+        matches.push(fullyQualifyCSSUrls(finalCSSText));
       }
     }
     return matches;
@@ -181,10 +207,9 @@ function reduceNode(node, settings) {
           candidateRules.push(new Rule(fullyQualifyCSSUrls(finalRuleText)));
         }
       } else if (rule instanceof CSSStyleRule) {
-        const selectorText = filterCSSPseudos(rule.selectorText);
-        if (finalDocument.matches(selectorText) ||
-            finalDocument.querySelector(selectorText)) {
-          candidateRules.push(new Rule(fullyQualifyCSSUrls(rule.cssText)));
+        const finalCSSText = getPotentiallyUsedRuleParts(rule, finalDocument);
+        if (finalCSSText) {
+          candidateRules.push(new Rule(fullyQualifyCSSUrls(finalCSSText)));
         }
       } else {
         console.error(chrome.i18n.getMessage("errorUnexpectedCSSRule"), rule);
