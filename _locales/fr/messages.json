@@ -1,6 +1,6 @@
 {
   "addonDescription": {
-    "message": "Extrait le code HTML et CSS pour générer des cas de test. "
+    "message": "Extrait le code HTML et CSS pour générer un test."
   },
   "addonName": {
     "message": "Testcase Reducer"
@@ -9,13 +9,13 @@
     "message": "Inclure les @media"
   },
   "alsoIncludeAncestors": {
-    "message": "Inclure les noeuds parents"
+    "message": "Inclure les nœuds parent"
   },
   "alsoIncludeCSSFonts": {
     "message": "Inclure les polices CSS"
   },
   "alsoIncludeMetas": {
-    "message": "Inclure les meta tags important"
+    "message": "Inclure les meta tags importants"
   },
   "alsoIncludePageRules": {
     "message": "Inclure les @page"
@@ -24,19 +24,19 @@
     "message": "Inclure les scripts"
   },
   "confirmLoseEdits": {
-    "message": "Perdre vos modification et restreindre à nouveau ?"
+    "message": "Perdre vos modifications initiales et réduire à nouveau ?"
   },
   "couldNotAccessInspectedNode": {
-    "message": "Impossible d'acceder au noeud... cross-origin iframe?"
+    "message": "Impossible d'accéder au nœud… cross-origin iframe?"
   },
   "errorNoResultsAvailable": {
     "message": "Aucun résultat n'a pu être obtenu."
   },
   "errorUnexpectedCSSRule": {
-    "message": "Testcase Reducer a trouvé une règle CSS inattendue :"
+    "message": "Testcase Reducer a trouvé une règle CSS inattendue : "
   },
   "showSameViewportSize": {
-    "message": "Afficher l'iframe dans sa taille original "
+    "message": "Afficher l'iframe dans sa taille originale"
   },
   "openInCodePen": {
     "message": "Envoyer sur CodePen"
@@ -51,7 +51,7 @@
     "message": "Ouvrir dans un nouvel onglet"
   },
   "reduce": {
-    "message": "Restreindre"
+    "message": "Réduire"
   },
   "refine": {
     "message": "Peaufiner"
