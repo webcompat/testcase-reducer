@@ -1,0 +1,68 @@
+{
+  "addonDescription": {
+    "message": "Extrait le code HTML et CSS pour générer un test."
+  },
+  "addonName": {
+    "message": "Testcase Reducer"
+  },
+  "alsoIncludeAllMedias": {
+    "message": "Inclure les @media"
+  },
+  "alsoIncludeAncestors": {
+    "message": "Inclure les nœuds parent"
+  },
+  "alsoIncludeCSSFonts": {
+    "message": "Inclure les polices CSS"
+  },
+  "alsoIncludeMetas": {
+    "message": "Inclure les meta tags importants"
+  },
+  "alsoIncludePageRules": {
+    "message": "Inclure les @page"
+  },
+  "alsoIncludeScripts": {
+    "message": "Inclure les scripts"
+  },
+  "confirmLoseEdits": {
+    "message": "Perdre vos modifications initiales et réduire à nouveau ?"
+  },
+  "couldNotAccessInspectedNode": {
+    "message": "Impossible d'accéder au nœud… cross-origin iframe?"
+  },
+  "errorNoResultsAvailable": {
+    "message": "Aucun résultat n'a pu être obtenu."
+  },
+  "errorUnexpectedCSSRule": {
+    "message": "Testcase Reducer a trouvé une règle CSS inattendue : "
+  },
+  "showSameViewportSize": {
+    "message": "Afficher l'iframe dans sa taille originale"
+  },
+  "openInCodePen": {
+    "message": "Envoyer sur CodePen"
+  },
+  "openInJSBin": {
+    "message": "Envoyer sur JSBin"
+  },
+  "openInJSFiddle": {
+    "message": "Envoyer sur JSFiddle"
+  },
+  "openInNewTab": {
+    "message": "Ouvrir dans un nouvel onglet"
+  },
+  "reduce": {
+    "message": "Réduire"
+  },
+  "refine": {
+    "message": "Peaufiner"
+  },
+  "couldNotRefine": {
+    "message": "Impossible de peaufiner"
+  },
+  "beautify": {
+    "message": "Formater"
+  },
+  "reducedTestCase": {
+    "message": "Restreindre le test $1"
+  }
+}
