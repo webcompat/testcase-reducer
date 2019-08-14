@@ -12,3 +12,9 @@ An addon helping to reduce test-cases from live pages.
 3. Click "reduce" to see the resulting markup and a preview.
    - Showing the preview iframe with the original viewport size can help reveal responsive breakpoint issues.
 4. Copy and paste the markup to your own local file, or click to upload to Codepen, JSBin, or JSFiddle.
+
+# Credits
+This addon makes use of the following third-party libraries:
+
+- JS Beautify by Einar Lielmanis, Liam Newman et al (https://github.com/beautify-web/js-beautify)
+- Node CSS Selector Parser by Dulin Marat (https://github.com/mdevils/node-css-selector-parser)
