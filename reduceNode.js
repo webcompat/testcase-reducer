@@ -104,7 +104,11 @@ function reduceNode(node, settings) {
   }
 
   class Rule {
-    constructor(text, keyframeName, fontfaceName) {
+    constructor(rule, text, keyframeName, fontfaceName) {
+      const style = rule && rule.style || {};
+      this.style = new Proxy({}, {
+        get: (_, prop) => style[prop] || "",
+      });
       this.text = text;
       this.unused = false;
       this.keyframeName = keyframeName;
@@ -158,7 +162,7 @@ function reduceNode(node, settings) {
       if (rule instanceof CSSFontFaceRule) {
         if (alsoIncludeCSSFonts) {
           const family = rule.style.getPropertyValue("font-family");
-          candidateRules.push(new Rule(fullyQualifyCSSUrls(rule.cssText),
+          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(rule.cssText),
                                        undefined, family));
         }
       } else if (rule instanceof CSSImportRule) {
@@ -171,7 +175,7 @@ function reduceNode(node, settings) {
         }
       } else if (rule instanceof CSSKeyframesRule) {
         // We filter out the unused keyframes later, from the reduced rule set.
-        candidateRules.push(new Rule(fullyQualifyCSSUrls(rule.cssText),
+        candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(rule.cssText),
                                      rule.name));
       } else if (rule instanceof CSSMediaRule) {
         if (alsoIncludeAllMedias ||
@@ -181,7 +185,7 @@ function reduceNode(node, settings) {
             const finalRuleText = `@media ${rule.conditionText} {
               ${matches.join("\n")}
             }`;
-            candidateRules.push(new Rule(fullyQualifyCSSUrls(finalRuleText)));
+            candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalRuleText)));
           }
         }
       } else if (haveMozDocumentRule && rule instanceof CSSMozDocumentRule) {
@@ -190,13 +194,13 @@ function reduceNode(node, settings) {
           const finalRuleText = `@-moz-document ${rule.conditionText} {
             ${matches.join("\n")}
           }`;
-          candidateRules.push(new Rule(fullyQualifyCSSUrls(finalRuleText)));
+          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalRuleText)));
         }
       } else if (rule instanceof CSSNamespaceRule) {
-        candidateRules.push(new Rule(fullyQualifyCSSUrls(rule.cssText)));
+        candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(rule.cssText)));
       } else if (rule instanceof CSSPageRule) {
         if (alsoIncludePageRules) {
-          candidateRules.push(new Rule(rule.cssText));
+          candidateRules.push(new Rule(rule, rule.cssText));
         }
       } else if (rule instanceof CSSSupportsRule) {
         const matches = getSubruleMatches(rule, finalDocument);
@@ -204,12 +208,12 @@ function reduceNode(node, settings) {
           const finalRuleText = `@supports ${rule.conditionText} {
             ${matches.join("\n")}
           }`;
-          candidateRules.push(new Rule(fullyQualifyCSSUrls(finalRuleText)));
+          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalRuleText)));
         }
       } else if (rule instanceof CSSStyleRule) {
         const finalCSSText = getPotentiallyUsedRuleParts(rule, finalDocument);
         if (finalCSSText) {
-          candidateRules.push(new Rule(fullyQualifyCSSUrls(finalCSSText)));
+          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalCSSText)));
         }
       } else {
         console.error(chrome.i18n.getMessage("errorUnexpectedCSSRule"), rule);
@@ -218,7 +222,7 @@ function reduceNode(node, settings) {
     for (const srcSheet of sheets) {
       const sheet = await getUsableStylesheet(srcSheet);
       if (sheet) {
-        replaceCSSUrl.baseUrl = sheet.href;
+        replaceCSSUrl.baseUrl = sheet.baseUrl || sheet.href;
         for (const rule of sheet.cssRules) {
           await processRule(rule);
         }
@@ -232,24 +236,20 @@ function reduceNode(node, settings) {
         continue;
       }
       rule.unused = true;
-      if (keyframe !== undefined) {
-        const frameNameRE = new RegExp(
-          `(\\s|^|;|{)animation(-name)?\\s*?:[,\\s]*?${keyframe}\\s*?(,|;|$)`);
+      if (keyframe) {
+        const keyframeRE = new RegExp(
+          `(^|,)\\s*${keyframe}\\s*(,|$)`, "i");
         for (const candidate of candidateRules) {
-          if (candidate.keyframeName === undefined &&
-              candidate.fontfaceName === undefined &&
-              candidate.text.match(frameNameRE)) {
+          if (candidate.style.animationName.match(keyframeRE)) {
             rule.unused = false;
             break;
           }
         }
-      } else if (fontface !== undefined) {
+      } else if (fontface) {
         const fontfaceRE = new RegExp(
-          `(\\s|^|;|{)font(-family?)\\s*:[^};]*${fontface}[\\s,;}"']`);
+          `("${fontface}"|'${fontface}'|(^|,)\\s*${fontface}\\s*(,|$))`, "i");
         for (const candidate of candidateRules) {
-          if (candidate.keyframeName === undefined &&
-              candidate.fontfaceName === undefined &&
-              candidate.text.match(fontfaceRE)) {
+          if (candidate.style.fontFamily.match(fontfaceRE)) {
             rule.unused = false;
             break;
           }
