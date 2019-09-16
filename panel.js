@@ -90,20 +90,21 @@ function confirmLoseEdits() {
   });
 }
 
-const useCS = {
-  useContentScriptContext: true,
-};
-
-function storeInspectedNodeOnContentScript() {
-  window.inspectedNode = $0;
+function markInspectedNode(requestId) {
+  $0.setAttribute(`r${requestId}`, "");
 }
 
-function storeInspectedNodeOnPageScript(id) {
-  window[id] = $0;
+function unmarkInspectedNode(requestId) {
+  $0.removeAttribute(`r${requestId}`);
 }
 
 function runReductionInContentScript(reduceRequest) {
-  chrome.runtime.sendMessage({reduceRequest}, handleReductionResult);
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({reduceRequest}, result => {
+      handleReductionResult(result);
+      resolve();
+    });
+  });
 }
 
 function handleReductionResult({result, error}) {
@@ -169,6 +170,7 @@ async function reduceInspectorSelection() {
 
   const tabId = chrome.devtools.inspectedWindow.tabId;
   const reduceRequest = Object.assign(getCurrentlySelectedOptions(), {
+    id: Date.now(),
     tabId,
   });
 
@@ -184,33 +186,18 @@ async function reduceInspectorSelection() {
       return;
     }
 
-    // Now we have to pass in the currently-selected node. In Chrome, we have to tell
-    // it to run evals in the content script.
-    try {
-      chrome.devtools.inspectedWindow.eval(
-        `(${storeInspectedNodeOnContentScript})()`,
-        useCS,
-        () => {
-          runReductionInContentScript(reduceRequest);
+    chrome.devtools.inspectedWindow.eval(
+      `(${markInspectedNode})(${reduceRequest.id})`,
+      async error => {
+        if (error) {
+          updateUI(chrome.i18n.getMessage("couldNotAccessInspectedNode"));
+        } else {
+          await runReductionInContentScript(reduceRequest);
         }
-      );
-    } catch (error) {
-      if (error.message.includes("useContentScriptContext")) {
-        // Firefox just uses the content script by default, so no issue there.
         chrome.devtools.inspectedWindow.eval(
-          `(${storeInspectedNodeOnPageScript})(${JSON.stringify(chrome.runtime.id)})`,
-          error => {
-            if (error) {
-              updateUI(chrome.i18n.getMessage("couldNotAccessInspectedNode"));
-            } else {
-              runReductionInContentScript(reduceRequest);
-            }
-          }
-        );
-      } else {
-        console.error(error);
+          `(${unmarkInspectedNode})(${reduceRequest.id})`);
       }
-    }
+    );
   });
 }
 

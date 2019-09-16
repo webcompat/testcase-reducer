@@ -8,23 +8,23 @@
 
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
   if (msg === "ping") {
-    return;
+    return false;
   }
 
   // Browsers supporting useContentScriptContext will have already stored the
   // inspected node on the content script for us.  Other browsers have to store
   // it on the actual page for us to read here (we should unset it now, too).
   const requestId = msg.reduceRequest.id;
-  const node = window.inspectedNode ||
-               (window.wrappedJSObject && window.wrappedJSObject[chrome.runtime.id]);
+  const {frameId} = msg.reduceRequest;
+  const node = document.querySelector(`[r${requestId}]`);
   if (!node) {
-    chrome.runtime.sendMessage({requestId}, () => { chrome.runtime.lastError; });
-    return;
+    sendResponse({requestId, frameId});
+    return false;
   }
-  delete window[chrome.runtime.id];
   reduceNode(node, msg.reduceRequest).then(result => {
-    chrome.runtime.sendMessage({requestId, result}, () => { chrome.runtime.lastError; });
+    sendResponse({requestId, frameId, result});
   }, error => {
-    chrome.runtime.sendMessage({requestId, error}, () => { chrome.runtime.lastError; });
+    sendResponse({requestId, frameId, error});
   });
+  return true;
 });

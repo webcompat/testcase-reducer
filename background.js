@@ -5,18 +5,22 @@ let currentRequest;
 async function doReduction(reduceRequest, callback) {
   const {tabId} = reduceRequest;
   currentRequest = {callback, errors: []};
-  const requestId = reduceRequest.id = currentRequest.id = Date.now();
+  const requestId = currentRequest.id = reduceRequest.id;
 
   chrome.webNavigation.getAllFrames({tabId}, frames => {
-    currentRequest.framesLeft = frames.length;
+    currentRequest.framesLeft = new Set();
     for (const {frameId, errorOccurred} of frames) {
+      currentRequest.framesLeft.add(frameId);
       if (errorOccurred) {
-        incomingResponseFromFrame({requestId});
+        incomingResponseFromFrame({requestId, frameId});
         continue;
       }
-      chrome.tabs.sendMessage(tabId, {reduceRequest}, {frameId}, () => {
+      const frameRequest = Object.assign({frameId}, reduceRequest);
+      chrome.tabs.sendMessage(tabId, {reduceRequest: frameRequest}, {frameId}, msg => {
         if (chrome.runtime.lastError) {
-          incomingResponseFromFrame({requestId, error: chrome.runtime.lastError.toString()});
+          incomingResponseFromFrame({requestId, frameId, error: chrome.runtime.lastError.toString()});
+        } else {
+          incomingResponseFromFrame(msg);
         }
       });
     }
@@ -24,17 +28,21 @@ async function doReduction(reduceRequest, callback) {
 }
 
 function incomingResponseFromFrame(response) {
-  const {requestId, result, error} = response || {};
+  const {requestId, result, frameId, error} = response || {};
   if (requestId !== currentRequest.id) {
     return;
   }
+  if (!currentRequest.framesLeft.has(frameId)) {
+    return;
+  }
+  currentRequest.framesLeft.delete(frameId);
   if (result) {
     currentRequest.result = result;
   }
   if (error) {
     currentRequest.errors.push(error);
   }
-  if (!--currentRequest.framesLeft) {
+  if (!currentRequest.framesLeft.size) {
     if (currentRequest.result) {
       currentRequest.callback({result: currentRequest.result});
     } else {
@@ -195,9 +203,7 @@ function openMarkupUsingSite(markup, title, site, originalURL) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
-  if (msg.requestId) {
-    incomingResponseFromFrame(msg);
-  } else if (msg.reduceRequest) {
+  if (msg.reduceRequest) {
     doReduction(msg.reduceRequest, sendResponse);
     return true;
   } else if (msg.ensureContentScriptInTabId) {
