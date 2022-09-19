@@ -6,7 +6,7 @@
 
 // TODO: a way to reduce test-cases on Android.
 
-/* global $0, html_beautify, reduceNode */
+/* global $0, chrome, html_beautify, reduceNode */
 
 document.addEventListener("DOMContentLoaded", startup);
 
@@ -19,12 +19,14 @@ let textAreaModified = false;
 
 function startup() {
   // Reload the previous state of the UI
-  document.querySelectorAll("label[id] > input[type=checkbox]").forEach(input => {
-    input.checked = localStorage[input.parentNode.id] === "true";
-  });
+  document
+    .querySelectorAll("label[id] > input[type=checkbox]")
+    .forEach(input => {
+      input.checked = localStorage[input.parentNode.id] === "true";
+    });
 
-  document.body.addEventListener("click", ({target}) => {
-    const {id} = target;
+  document.body.addEventListener("click", ({ target }) => {
+    const { id } = target;
     if (id === "reduce") {
       reduceInspectorSelection();
     } else if (id === "refine") {
@@ -36,7 +38,7 @@ function startup() {
     }
   });
 
-  document.body.addEventListener("change", ({target}) => {
+  document.body.addEventListener("change", ({ target }) => {
     if (target.nodeName === "TEXTAREA") {
       textAreaModified = true;
       updateUI();
@@ -70,8 +72,9 @@ function startup() {
     "refine",
     "showSameViewportSize",
   ]) {
-    document.querySelector(`#${label}`).
-      appendChild(document.createTextNode(chrome.i18n.getMessage(label)));
+    document
+      .querySelector(`#${label}`)
+      .appendChild(document.createTextNode(chrome.i18n.getMessage(label)));
   }
 
   updateIFrameViewportSize();
@@ -100,21 +103,21 @@ function unmarkInspectedNode(requestId) {
 
 function runReductionInContentScript(reduceRequest) {
   return new Promise(resolve => {
-    chrome.runtime.sendMessage({reduceRequest}, result => {
+    chrome.runtime.sendMessage({ reduceRequest }, result => {
       handleReductionResult(result);
       resolve();
     });
   });
 }
 
-function handleReductionResult({result, error}) {
+function handleReductionResult({ result, error }) {
   textAreaModified = false;
   if (error || result.error) {
     updateUI(error || result.error);
   } else {
-    const {html, url, viewport} = result;
+    const { html, url, viewport } = result;
     document.querySelector("textarea").value = html;
-    const {host} = new URL(url);
+    const { host } = new URL(url);
     const title = chrome.i18n.getMessage("reducedTestCase", host);
     updateUI(html, viewport, title, url);
     for (const button of document.querySelectorAll("#beautify, #refine")) {
@@ -131,18 +134,24 @@ function refine() {
   iframe.style.position = "absolute";
   iframe.style.overflow = "auto";
   iframe.srcdoc = ta.value;
-  const cleanup = () => { iframe.remove(); };
+  const cleanup = () => {
+    iframe.remove();
+  };
   iframe.onload = () => {
     if (!iframe.contentDocument) {
       updateUI(chrome.i18n.getMessage("couldNotRefine"));
       cleanup();
       return;
     }
-    ta.value = reduceNode(iframe.contentDocument.documentElement,
-                          getCurrentlySelectedOptions()).
-                then(result => handleReductionResult({result}),
-                     error => handleReductionResult({error})).
-                then(cleanup);
+    ta.value = reduceNode(
+      iframe.contentDocument.documentElement,
+      getCurrentlySelectedOptions()
+    )
+      .then(
+        result => handleReductionResult({ result }),
+        error => handleReductionResult({ error })
+      )
+      .then(cleanup);
   };
   document.body.appendChild(iframe);
 }
@@ -154,17 +163,26 @@ function beautify() {
 
 function getCurrentlySelectedOptions() {
   return {
-    alsoIncludeAllMedias: document.querySelector("#alsoIncludeAllMedias > input").checked,
-    alsoIncludeAncestors: document.querySelector("#alsoIncludeAncestors > input").checked,
-    alsoIncludeCSSFonts: document.querySelector("#alsoIncludeCSSFonts > input").checked,
-    alsoIncludeMetas: document.querySelector("#alsoIncludeMetas > input").checked,
-    alsoIncludePageRules: document.querySelector("#alsoIncludePageRules > input").checked,
-    alsoIncludeScripts: document.querySelector("#alsoIncludeScripts > input").checked,
+    alsoIncludeAllMedias: document.querySelector(
+      "#alsoIncludeAllMedias > input"
+    ).checked,
+    alsoIncludeAncestors: document.querySelector(
+      "#alsoIncludeAncestors > input"
+    ).checked,
+    alsoIncludeCSSFonts: document.querySelector("#alsoIncludeCSSFonts > input")
+      .checked,
+    alsoIncludeMetas: document.querySelector("#alsoIncludeMetas > input")
+      .checked,
+    alsoIncludePageRules: document.querySelector(
+      "#alsoIncludePageRules > input"
+    ).checked,
+    alsoIncludeScripts: document.querySelector("#alsoIncludeScripts > input")
+      .checked,
   };
 }
 
 async function reduceInspectorSelection() {
-  if (textAreaModified && !await confirmLoseEdits()) {
+  if (textAreaModified && !(await confirmLoseEdits())) {
     return;
   }
 
@@ -175,7 +193,7 @@ async function reduceInspectorSelection() {
   });
 
   // First we ensure our content scripts are started with our reducing code.
-  chrome.runtime.sendMessage({ensureContentScriptInTabId: tabId}, error => {
+  chrome.runtime.sendMessage({ ensureContentScriptInTabId: tabId }, error => {
     if (error) {
       console.error(error);
       return;
@@ -195,7 +213,8 @@ async function reduceInspectorSelection() {
           await runReductionInContentScript(reduceRequest);
         }
         chrome.devtools.inspectedWindow.eval(
-          `(${unmarkInspectedNode})(${reduceRequest.id})`);
+          `(${unmarkInspectedNode})(${reduceRequest.id})`
+        );
       }
     );
   });
@@ -226,7 +245,10 @@ let currentReducedDocumentOriginalURL;
 let currentReducedDocumentTitle;
 
 function updateUI(_markup, viewport, title, url) {
-  const markup = typeof _markup === "string" ? _markup : document.querySelector("textarea").value;
+  const markup =
+    typeof _markup === "string"
+      ? _markup
+      : document.querySelector("textarea").value;
 
   const iframe = document.querySelector("iframe");
   iframe.srcdoc = markup;
@@ -251,3 +273,8 @@ function openInNewTab(site) {
     url: currentReducedDocumentOriginalURL,
   });
 }
+
+let port = chrome.runtime.connect();
+port.onMessage.addListener(result => {
+  handleReductionResult(result);
+});

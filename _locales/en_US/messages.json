@@ -85,5 +85,11 @@
   },
   "unparseableRule": {
     "message": "Testcase Reducer found an unparsable rule"
+  },
+  "noResult": {
+    "message": "No result received. Try running `reduceTestCase($0)` in the console."
+  },
+  "checkDevtoolsPanel": {
+    "message": "Results are being sent to the Testcase Reducer devtools panel."
   }
 }
