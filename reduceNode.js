@@ -8,9 +8,6 @@
 
 /* eslint-disable no-labels */
 
-// TODO: update the beautifier library
-// TODO: figure out the "extra <html>" issue
-
 class Block {
   rules = [];
   hasSubBlocks = false;
@@ -517,7 +514,6 @@ class StylesheetParser {
 }
 
 function reduceNode(node, settings) {
-  let parsingDocument;
   async function getUsableStylesheet(srcSheet) {
     if (!srcSheet || srcSheet.disabled) {
       return undefined;
@@ -529,8 +525,6 @@ function reduceNode(node, settings) {
     const css = href
       ? await (await fetch(href)).text()
       : srcSheet.ownerNode.textContent;
-    parsingDocument =
-      parsingDocument || document.implementation.createHTMLDocument("");
     const p = new StylesheetParser(
       srcSheet.baseUrl || srcSheet.href || location.href
     );
@@ -814,6 +808,9 @@ function reduceNode(node, settings) {
   // eslint-disable-next-line complexity
   async function reduce(node, settings = {}) {
     try {
+      const doc = node.ownerDocument;
+      const wndw = doc.defaultView;
+
       const {
         alsoIncludeAllMedias,
         alsoIncludeAncestors,
@@ -828,19 +825,19 @@ function reduceNode(node, settings) {
         newFinalDocument.appendChild(finalDocument);
         finalDocument = newFinalDocument;
         try {
-          finalDocument.prepend(document.createTextNode("\n"));
-          finalDocument.appendChild(document.createTextNode("\n"));
+          finalDocument.prepend(doc.createTextNode("\n"));
+          finalDocument.appendChild(doc.createTextNode("\n"));
         } catch (_) {}
       }
 
       function findOutermostUseElement(node) {
         let outermost;
         while (node) {
-          if (node instanceof SVGUseElement) {
+          if (node instanceof wndw.SVGUseElement) {
             outermost = node;
           }
           node = node.parentNode;
-          if (node instanceof ShadowRoot) {
+          if (node instanceof wndw.ShadowRoot) {
             node = node.host;
           }
         }
@@ -850,29 +847,24 @@ function reduceNode(node, settings) {
       node = findOutermostUseElement(node) || node;
 
       // If desired, we also consider the focused node's ancestors.
-      const topLevelHTMLWasSelected = node.parentNode instanceof Document;
       let finalDocument = node.cloneNode(true);
-      while (!(node.parentNode instanceof Document)) {
+      while (!(node.parentNode instanceof wndw.Document)) {
         node = node.parentNode;
-        if (node && node instanceof ShadowRoot) {
+        if (node && node instanceof wndw.ShadowRoot) {
           node = node.host;
         }
         if (
           alsoIncludeAncestors ||
-          node instanceof HTMLBodyElement ||
-          node instanceof SVGSVGElement
+          node instanceof wndw.HTMLBodyElement ||
+          node instanceof wndw.SVGSVGElement
         ) {
           alsoConsider(node);
         }
       }
 
       // node is now the <html> element, which we always need to consider and add.
-      const wndw = node.parentNode.defaultView;
-      const sheets = [].slice.call(node.parentNode.styleSheets || []);
-      if (!topLevelHTMLWasSelected) {
-        alsoConsider(node);
-      }
-      const doctypeNode = document.doctype;
+      const sheets = [].slice.call(doc.styleSheets);
+      const doctypeNode = doc.doctype;
       const doctype = doctypeNode ? `${doctypeToString(doctypeNode)}\n` : "";
       const viewport = {
         width: wndw.innerWidth,
@@ -894,11 +886,11 @@ function reduceNode(node, settings) {
         // child of an SVG container element, then the reference is invalid"
         if (
           !(
-            elem instanceof SVGElement ||
-            elem instanceof HTMLVideoElement ||
-            elem instanceof HTMLAudioElement ||
-            elem instanceof HTMLIFrameElement ||
-            elem instanceof HTMLCanvasElement
+            elem instanceof wndw.SVGElement ||
+            elem instanceof wndw.HTMLVideoElement ||
+            elem instanceof wndw.HTMLAudioElement ||
+            elem instanceof wndw.HTMLIFrameElement ||
+            elem instanceof wndw.HTMLCanvasElement
           )
         ) {
           memoizedUseReferences.set(elem, false);
@@ -908,7 +900,7 @@ function reduceNode(node, settings) {
         // "If the referenced element is a (shadow-including) ancestor of the ‘use’
         // element, then this is an invalid circular reference"
         while (elem) {
-          if (elem instanceof ShadowRoot) {
+          if (elem instanceof wndw.ShadowRoot) {
             memoizedUseReferences.set(elem, false);
             return false;
           }
@@ -922,8 +914,8 @@ function reduceNode(node, settings) {
         if (!use.href) {
           return;
         }
-        const base = document.getElementById(use.href.baseVal.substr(1));
-        const anim = document.getElementById(use.href.animVal.substr(1));
+        const base = doc.getElementById(use.href.baseVal.substr(1));
+        const anim = doc.getElementById(use.href.animVal.substr(1));
         if (base && isValidSVGUseReference(base)) {
           usedDefs.push(base);
           const inst = base.cloneNode(true);
@@ -975,9 +967,9 @@ function reduceNode(node, settings) {
         elem.remove();
       }
 
-      const head = document.createElement("head");
+      const head = doc.createElement("head");
       finalDocument.prepend(head);
-      finalDocument.prepend(document.createTextNode("\n"));
+      finalDocument.prepend(doc.createTextNode("\n"));
 
       // Note any <defs> being used via SVG url() properties.
       for (const attr of [
@@ -989,10 +981,10 @@ function reduceNode(node, settings) {
         "marker-mid",
         "marker-start",
       ]) {
-        for (const elem of document.querySelectorAll(`[${attr}]`)) {
+        for (const elem of doc.querySelectorAll(`[${attr}]`)) {
           const url = (elem.getAttribute(attr).match(/url\((.*)\)/) || [])[1];
-          if (url && url.startsWith("#") && elem instanceof SVGElement) {
-            const ref = document.getElementById(url.substr(1));
+          if (url && url.startsWith("#") && elem instanceof wndw.SVGElement) {
+            const ref = doc.getElementById(url.substr(1));
             if (ref) {
               usedDefs.push(ref);
             }
@@ -1004,19 +996,19 @@ function reduceNode(node, settings) {
         if (finalDocument.querySelector(`[id="${href.substr(1)}"]`)) {
           continue;
         }
-        const src = document.getElementById(href);
-        if (src && src instanceof SVGElement) {
+        const src = doc.getElementById(href);
+        if (src && src instanceof wndw.SVGElement) {
           usedDefs.push(src);
         }
       }
 
       // Copy over any <defs> that we need
       if (usedDefs.length) {
-        const s = document.createElement("svg");
+        const s = doc.createElement("svg");
         s.width = "0";
         s.height = "0";
         head.appendChild(s);
-        const d = document.createElement("defs");
+        const d = doc.createElement("defs");
         s.appendChild(d);
         for (const def of usedDefs) {
           d.appendChild(def.cloneNode(true));
@@ -1025,7 +1017,7 @@ function reduceNode(node, settings) {
 
       // Copy over any <meta> viewport, charset, or encoding directives.
       if (alsoIncludeMetas) {
-        const metas = [].slice.call(document.querySelectorAll("head > meta"));
+        const metas = [].slice.call(doc.querySelectorAll("head > meta"));
         for (const meta of metas) {
           if (
             meta.getAttribute("charset") ||
@@ -1033,34 +1025,34 @@ function reduceNode(node, settings) {
             meta.getAttribute("name") === "viewport"
           ) {
             head.appendChild(meta.cloneNode(false));
-            head.appendChild(document.createTextNode("\n"));
+            head.appendChild(doc.createTextNode("\n"));
           }
         }
       }
 
       // Add a UTF-8 charset if no encoding was specified.
       if (!head.querySelector("meta[charset], meta[http-equiv=Content-Type")) {
-        const meta = document.createElement("meta");
+        const meta = doc.createElement("meta");
         meta.setAttribute("charset", "UTF-8");
         head.appendChild(meta);
-        head.appendChild(document.createTextNode("\n"));
+        head.appendChild(doc.createTextNode("\n"));
       }
 
       // Copy over any <script> tags, if desired.
       if (alsoIncludeScripts) {
-        const scripts = [].slice.call(document.querySelectorAll("script"));
+        const scripts = [].slice.call(doc.querySelectorAll("script"));
         for (const script of scripts) {
           head.appendChild(script.cloneNode(true));
-          head.appendChild(document.createTextNode("\n"));
+          head.appendChild(doc.createTextNode("\n"));
         }
       }
 
       // Add a <style> with the CSS text.
-      const style = document.createElement("style");
-      style.appendChild(document.createTextNode(css));
+      const style = doc.createElement("style");
+      style.appendChild(doc.createTextNode(css));
       head.appendChild(style);
-      head.prepend(document.createTextNode("\n"));
-      head.appendChild(document.createTextNode("\n"));
+      head.prepend(doc.createTextNode("\n"));
+      head.appendChild(doc.createTextNode("\n"));
 
       // Fully-qualify all the URLs that we can.
       for (const node of finalDocument.querySelectorAll("[srcset]")) {
