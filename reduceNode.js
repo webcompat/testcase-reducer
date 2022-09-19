@@ -4,14 +4,517 @@
 
 "use strict";
 
-/* globals CSSMozDocumentRule, CssSelectorParser */
+/* globals chrome */
 
-var SelectorParser = new CssSelectorParser(); // eslint-disable-line no-var
-SelectorParser.registerSelectorPseudos("lang", "dir", "host", "host-context", "is", "where", "has", "contains", "not");
-SelectorParser.registerNumericPseudos("nth-child", "nth-last-child", "nth-col", "nth-last-col", "nth-of-type", "nth-last-of-type");
-SelectorParser.registerNestingOperators(">", "+", "~");
-SelectorParser.registerAttrEqualityMods("^", "$", "*", "~", "|");
-SelectorParser.enableSubstitutes();
+/* eslint-disable no-labels */
+
+// TODO: update the beautifier library
+// TODO: figure out the "extra <html>" issue
+
+class Block {
+  rules = [];
+  hasSubBlocks = false;
+  hasDeclarations = false;
+  internalURLs = new Set();
+  toString() {
+    if (!this.prelude) {
+      return this.rules.map(r => r.toString()).join("\n");
+    }
+
+    if (!this.hasSubBlocks && !this.hasDeclarations) {
+      return `${this.prelude.full};`;
+    }
+
+    return [
+      `${this.prelude.full} {`,
+      ...this.rules.map(r => r.toString()),
+      "}",
+    ].join("\n");
+  }
+  get blocks() {
+    return this.rules.filter(r => r instanceof Block);
+  }
+  getDeclarations(regex) {
+    const decls = [];
+    if (this.hasDeclarations) {
+      for (const decl of this.rules.filter(r => r instanceof Declaration)) {
+        if (decl.key.match(regex)) {
+          decls.push(decl);
+        }
+      }
+    }
+    return decls;
+  }
+}
+
+class Declaration {
+  #str = "";
+  constructor(str) {
+    this.#str = str;
+  }
+  toString() {
+    return `${this.#str};`;
+  }
+  #key;
+  #value;
+  #ensureSplit() {
+    if (!this.#key) {
+      const s = this.#str.split(":");
+      this.#key = s.shift();
+      this.#value = s.join(":");
+    }
+  }
+  get key() {
+    this.#ensureSplit();
+    return this.#key;
+  }
+  get value() {
+    this.#ensureSplit();
+    return this.#value;
+  }
+}
+
+class Comment {
+  #str = "";
+  constructor(str) {
+    this.#str = str;
+  }
+  toString() {
+    return `/*${this.#str}`;
+  }
+}
+
+class StylesheetParser {
+  #str = "";
+  #pos = 0;
+  #parsed;
+  #baseUrl;
+
+  constructor(baseUrl) {
+    this.#baseUrl = baseUrl;
+  }
+
+  fullyQualifyUrl(_ptail, block) {
+    let ptail = _ptail;
+    const parens = ptail[0] == "(";
+    if (parens) {
+      ptail = ptail.slice(1, -1);
+    }
+    if (ptail[0] == "'" || ptail[0] == '"') {
+      ptail = ptail.slice(1, -1);
+    }
+    try {
+      let url = ptail;
+      if (ptail.startsWith("#")) {
+        block?.internalURLs?.add(url);
+      } else {
+        url = `"${new URL(ptail, this.#baseUrl).href}"`;
+      }
+      return parens ? `(${url})` : url;
+    } catch (_) {}
+    return _ptail;
+  }
+
+  #parseCommentTail = /.*?\*\//msy;
+  parseCommentTail(block) {
+    this.#parseCommentTail.lastIndex = this.#pos;
+    let match = this.#str.match(this.#parseCommentTail);
+    if (!match) {
+      // unclosed comment going to the end of the stylesheet
+      console.warn(
+        chrome.i18n.getMessage("unclosedComment"),
+        this.#str.substr(this.#pos)
+      );
+      const pos = this.#pos;
+      this.#pos = this.#str.length;
+      return this.#str.substr(pos);
+    }
+    this.#pos += match[0].length;
+    return match[0];
+  }
+
+  #parseStringTail = /([^'"\\]*)(['"\\])/msy;
+  parseStringTail(block, endChar) {
+    if (endChar != '"' && endChar != "'") {
+      throw new Error("Need an end char single or double quote");
+    }
+    let tail = "";
+    while (1) {
+      this.#parseStringTail.lastIndex = this.#pos;
+      const match = this.#str.match(this.#parseStringTail);
+      if (!match) {
+        console.warn(
+          chrome.i18n.getMessage("unclosedString"),
+          this.#str.substr(this.#pos)
+        );
+        const pos = this.#pos;
+        this.#pos = this.#str.length;
+        return this.#str.substr(pos);
+      }
+      this.#pos += match[0].length;
+      tail += match[0];
+      if (match[2] == endChar) {
+        break;
+      }
+    }
+    return `${endChar}${tail}`;
+  }
+
+  #parseParensTail = /(.*?)(\)|\/\*|\[|\(\|'|")/msy;
+  parseParensTail(block) {
+    let tail = "";
+    looping: while (1) {
+      this.#parseParensTail.lastIndex = this.#pos;
+      const match = this.#str.match(this.#parseParensTail);
+      if (!match) {
+        console.warn(
+          chrome.i18n.getMessage("unclosedParentheses"),
+          this.#str.substr(this.#pos)
+        );
+        const pos = this.#pos;
+        this.#pos = this.#str.length;
+        return this.#str.substr(pos);
+      }
+      tail += match[1];
+      this.#pos += match[0].length;
+      switch (match[2]) {
+        case ")":
+          break looping;
+        case "(":
+          let ptail = this.parseParensTail(block);
+          if (tail.endsWith("url")) {
+            ptail = this.fullyQualifyUrl(ptail, block);
+          }
+          tail += ptail;
+          break;
+        case "[":
+          tail += this.parseBracketTail(block);
+          break;
+        case "/*":
+          const comment = this.parseCommentTail(block);
+          if (undefined === comment) {
+            return "";
+          }
+          if (comment.trim()) {
+            // don't bother with empty comments
+            tail += `/*${comment}`;
+          }
+          break;
+        case "'":
+        case '"':
+          const str = this.parseStringTail(block, match[2]);
+          if (str === undefined) {
+            return "";
+          }
+          tail += str;
+      }
+    }
+    return `(${tail})`;
+  }
+
+  #parseBracketTail = /(.*?)(\]|\/\*|\[|\(\|'|")/msy;
+  parseBracketTail(block) {
+    let tail = "";
+    looping: while (1) {
+      this.#parseBracketTail.lastIndex = this.#pos;
+      const match = this.#str.match(this.#parseBracketTail);
+      if (!match) {
+        console.warn(
+          chrome.i18n.getMessage("unclosedBrackets"),
+          this.#str.substr(this.#pos)
+        );
+        const pos = this.#pos;
+        this.#pos = this.#str.length;
+        return this.#str.substr(pos);
+      }
+      tail += match[1];
+      this.#pos += match[0].length;
+      switch (match[2]) {
+        case "]":
+          break looping;
+        case "(":
+          let ptail = this.parseParensTail(block);
+          if (tail.endsWith("url")) {
+            ptail = this.fullyQualifyUrl(ptail, block);
+          }
+          tail += ptail;
+          break;
+        case "[":
+          tail += this.parseBracketTail(block);
+          break;
+        case "/*":
+          const comment = this.parseCommentTail(block);
+          if (undefined === comment) {
+            return "";
+          }
+          if (comment.trim()) {
+            // don't bother with empty comments
+            tail += `/*${comment}`;
+          }
+          break;
+        case "'":
+        case '"':
+          const str = this.parseStringTail(block, match[2]);
+          if (str === undefined) {
+            return "";
+          }
+          tail += str;
+      }
+    }
+    return `[${tail}]`;
+  }
+
+  #parseWS = /\s*$/msy;
+  #parsePseudoTail = /(.*?)(\s+|,|\/\*|\(|\[|{|}|;|"|')/msy;
+  parsePseudoTail(block) {
+    let tail = "";
+    let spaceCnt = 0;
+    looping: while (this.#pos < this.#str.length) {
+      this.#parseWS.lastIndex = this.#pos;
+      let match = this.#str.match(this.#parseWS);
+      if (match) {
+        this.#pos += match[0];
+        if (++spaceCnt > 1) {
+          // pseudo is over if we hit spaces after it
+          break looping;
+        }
+        tail += match[1];
+      }
+      this.#parsePseudoTail.lastIndex = this.#pos;
+      match = this.#str.match(this.#parsePseudoTail);
+      if (!match) {
+        console.warn(
+          chrome.i18n.getMessage("unclosedPseudo"),
+          this.#str.substr(this.#pos)
+        );
+        const pos = this.#pos;
+        this.#pos = this.#str.length;
+        return this.#str.substr(pos);
+      }
+      this.#pos += match[0].length;
+      tail += match[1];
+      switch (match[2]) {
+        case ":":
+          ptail += this.parsePseudo(block);
+          break;
+        case "(":
+          let ptail = this.parseParensTail(block);
+          if (tail.endsWith("url")) {
+            ptail = this.fullyQualifyUrl(ptail, block);
+          }
+          tail += ptail;
+          break;
+        case "[":
+          tail += this.parseBracketTail(block);
+          break;
+        case "{":
+        case "}":
+        case ";":
+          // back up so the block parser sees this
+          this.#pos--;
+          break looping;
+        case "/*":
+          const comment = this.parseCommentTail(block);
+          if (undefined === comment) {
+            break looping;
+          }
+          if (comment.trim()) {
+            // don't bother with empty comments
+            tail += `/*${comment}`;
+          }
+          break;
+        case "'":
+        case '"':
+          const str = this.parseStringTail(block, match[2]);
+          if (str === undefined) {
+            break looping;
+          }
+          tail += str;
+          break;
+        case ",": // comma == done, but back up to let the block parser see it too
+          this.#pos--;
+          break looping;
+        default:
+          // spaces == done
+          tail += " ";
+          break looping;
+      }
+    }
+    return tail;
+  }
+
+  #pseudolessCheck = /[>~+|]$/;
+  cleanSelector(full, withoutPseudos) {
+    full = full.trim();
+    // The pseudo-removing code does not ensure that the result is valid. So if the
+    // result ends with a combinator, we add * (ie, `td>:last-child` -> `td>` -> `td>*`)
+    withoutPseudos = withoutPseudos
+      .trim()
+      .replace(this.#pseudolessCheck, "$&*");
+    if (!withoutPseudos && full) {
+      withoutPseudos = "*";
+    }
+    return { full, withoutPseudos };
+  }
+
+  // blocks have the recursive form [@]prelude { list of (block | declaration | comment) }
+  // where declaration are simply key:value[;]
+  // comments are treated as rules in case we want to keep them.
+  // loop:
+  // - build a token up to the next ; or { or }, taking care to avoid
+  //     escaping in strings and the contents of [] and ().
+  //   - also store the prelude, both with and without pseudoselectors
+  //   - if we find a ; or } first, we just have a key:value pair.
+  //   - if we find a { first, we have a full block (at-rule, declaration list etc)
+  #parseBlock = /(\s*.*?)(\<\!--|--\>|,|\/\*|\(|\[|{|}|:|;|"|')/msy;
+  #endsWithSpace = /\s+$/;
+  #preludeParts = /^(\S*?)(\s+((.*)))?$/ms;
+  parseBlock(toplevel = false) {
+    const block = new Block();
+    let token = "";
+    let potentialSelector = "";
+    let potentialSelectorNoPseudos = "";
+    let prelude = ""; // the full prelude
+    let selectors = []; // individual selectors in the prelude
+    looping: while (this.#pos < this.#str.length) {
+      this.#parseBlock.lastIndex = this.#pos;
+      const match = this.#str.match(this.#parseBlock);
+      if (!match) {
+        this.#parseWS.lastIndex = this.#pos;
+        if (this.#str.match(this.#parseWS)) {
+          break;
+        }
+        console.warn(
+          chrome.i18n.getMessage("unclosedBlock"),
+          this.#str.substr(this.#pos)
+        );
+        break looping;
+      }
+      this.#pos += match[0].length;
+      token += match[1];
+      potentialSelector += match[1];
+      potentialSelectorNoPseudos += match[1];
+      switch (match[2]) {
+        case "<!--":
+        case "-->":
+          if (!toplevel) {
+            token += match[2];
+            potentialSelector += match[2];
+            potentialSelectorNoPseudos += match[2];
+          }
+          break;
+        case ",":
+          token += ",";
+          selectors.push(
+            this.cleanSelector(potentialSelector, potentialSelectorNoPseudos)
+          );
+          potentialSelector = "";
+          potentialSelectorNoPseudos = "";
+          break;
+        case ":":
+          const ctail = `:${this.parsePseudoTail(block)}`;
+          token += ctail;
+          potentialSelector += ctail;
+          if (potentialSelector.match(this.#endsWithSpace)) {
+            potentialSelectorNoPseudos += " ";
+          }
+          break;
+        case "(":
+          let ptail = this.parseParensTail(block);
+          if (token.endsWith("url")) {
+            ptail = this.fullyQualifyUrl(ptail, block);
+          }
+          token += ptail;
+          potentialSelector += ptail;
+          potentialSelectorNoPseudos += ptail;
+          break;
+        case "[":
+          let btail = this.parseBracketTail(block);
+          token += btail;
+          potentialSelector += btail;
+          potentialSelectorNoPseudos += btail;
+          break;
+        case "{": // must be a rule set
+          const subblock = this.parseBlock();
+          if (!subblock) {
+            break looping;
+          }
+          potentialSelector = potentialSelector.trim();
+          if (potentialSelector) {
+            selectors.push(
+              this.cleanSelector(potentialSelector, potentialSelectorNoPseudos)
+            );
+          }
+          prelude += token;
+          prelude = prelude.trim();
+          const preludeMatch = prelude.match(this.#preludeParts);
+          subblock.prelude = {
+            full: prelude,
+            type: preludeMatch[1],
+            condition: preludeMatch[3],
+          };
+          subblock.selectors = selectors;
+          block.rules.push(subblock);
+          block.hasSubBlocks = true;
+          token = "";
+          potentialSelector = "";
+          potentialSelectorNoPseudos = "";
+          prelude = "";
+          selectors = [];
+          break;
+        case "}":
+        case ";": // must have found just a rule, not a block
+          token = token.trim();
+          if (token) {
+            block.rules.push(new Declaration(token));
+            block.hasDeclarations = true;
+            token = "";
+            potentialSelector = "";
+            potentialSelectorNoPseudos = "";
+          }
+          if (match[2] == "}") {
+            break looping;
+          } else {
+            break;
+          }
+        case "/*":
+          const comment = this.parseCommentTail(block);
+          if (undefined === comment) {
+            return block;
+          }
+          if (comment.trim()) {
+            // don't bother with empty comments
+            block.rules.push(new Comment(comment));
+          }
+          break;
+        case "'":
+        case '"':
+          const str = this.parseStringTail(block, match[2]);
+          if (str === undefined) {
+            return block;
+          }
+          token += str;
+          potentialSelector += str;
+          potentialSelectorNoPseudos += str;
+      }
+    }
+    return block;
+  }
+
+  parse(str, pos = 0, toplevel = true) {
+    this.#str = str;
+    this.#pos = pos;
+    this.#parsed = this.parseBlock(toplevel);
+  }
+
+  toString() {
+    return `${this.#parsed?.toString()}`;
+  }
+
+  get blocks() {
+    return this.#parsed?.blocks;
+  }
+}
 
 function reduceNode(node, settings) {
   let parsingDocument;
@@ -19,23 +522,21 @@ function reduceNode(node, settings) {
     if (!srcSheet || srcSheet.disabled) {
       return undefined;
     }
-    try {
-      srcSheet.cssRules; // can throw SecurityError
-      return srcSheet;
-    } catch (e) {
-      parsingDocument = parsingDocument ||
-                        document.implementation.createHTMLDocument("");
-      const href = srcSheet.href;
-      const css = href ? (await (await fetch(href)).text())
-                       : srcSheet.ownerNode.textContent;
-      const style = parsingDocument.createElement("style");
-      style.textContent = css;
-      parsingDocument.head.appendChild(style);
-      const sheet = style.sheet;
-      sheet.baseUrl = href;
-      style.remove();
-      return sheet;
+    if (srcSheet._cachedParse) {
+      return srcSheet._cachedParse;
     }
+    const href = srcSheet.href;
+    const css = href
+      ? await (await fetch(href)).text()
+      : srcSheet.ownerNode.textContent;
+    parsingDocument =
+      parsingDocument || document.implementation.createHTMLDocument("");
+    const p = new StylesheetParser(
+      srcSheet.baseUrl || srcSheet.href || location.href
+    );
+    p.parse(css);
+    srcSheet._cachedParse = p;
+    return p;
   }
 
   const docHref = location.href;
@@ -45,13 +546,12 @@ function reduceNode(node, settings) {
   function fullyQualifyURL(url, baseUrl) {
     baseUrl = baseUrl || docHref;
     if (url.startsWith("#")) {
-      referencedInternalLinks.add(url);
+      referencedInternalLinks.add(url.substr(1));
       return url;
     }
     try {
       return new URL(url, baseUrl).href;
-    } catch (e) {
-    }
+    } catch (e) {}
     return url;
   }
 
@@ -64,455 +564,530 @@ function reduceNode(node, settings) {
     return srcset.replace(regexSrcSet, replaceSrcSetURL);
   }
 
-  function replaceCSSUrl($0, pre, url, post) {
-    return `${pre}${fullyQualifyURL(url, replaceCSSUrl.baseUrl) || url}${post}`;
+  function isSelectorUsedByDocument(sel, doc, rule) {
+    try {
+      return doc.matches(sel) || doc.querySelector(sel);
+    } catch (e) {
+      console.error(chrome.i18n.getMessage("invalidSelector"), sel, rule);
+      return true;
+    }
   }
 
-  const regexCSSURLNoQuotes = /(url\(^["'](.*?)\))/ig;
-  const regexCSSURLSingleQuotes = /(url\(')(.*?)('\))/ig;
-  const regexCSSURLDoubleQuotes = /(url\(")(.*?)("\))/ig;
-  function fullyQualifyCSSUrls(cssText) {
-    return cssText.replace(regexCSSURLSingleQuotes, replaceCSSUrl).
-                   replace(regexCSSURLDoubleQuotes, replaceCSSUrl).
-                   replace(regexCSSURLNoQuotes, replaceCSSUrl);
+  const parseDoc = document.implementation.createHTMLDocument("");
+  const parseDocStyle = parseDoc.createElement("style");
+  parseDoc.head.appendChild(parseDocStyle);
+
+  function getCSSRule(text) {
+    try {
+      parseDocStyle.textContent = text;
+      return parseDoc.styleSheets[0].cssRules[0];
+    } catch (_) {
+      console.warn(chrome.i18n.getMessage("unparseableRule"), text);
+    }
+    return {};
   }
 
-  function stripPseudos(entity) {
-    if (entity.pseudos) {
-      delete entity.pseudos;
-      if (!entity.classNames && !entity.tagName) {
-        entity.tagName = "*";
+  const keyframesRE = /^@[\w-]*keyframes/i;
+  const fontFamilyRE = /^font(-family)?$/i;
+  const animationNameRE = /^(-(?!-).*)?animation(-name)?$/i;
+  async function getCSSTextApplyingTo(
+    wndw,
+    sheets,
+    finalDocument,
+    alsoIncludeAllMedias,
+    alsoIncludeCSSFonts,
+    alsoIncludePageRules
+  ) {
+    const keyframeRules = new Set();
+    const fontfaceRules = new Set();
+    async function processRulePhase1(rule) {
+      switch (rule.prelude.type) {
+        case "@font-face":
+          if (!alsoIncludeCSSFonts) {
+            rule.skip = true;
+          }
+          const fam = rule
+            .getDeclarations(fontFamilyRE)
+            .pop()
+            ?.value.trim();
+          if (!fam) {
+            rule.skip = true;
+            return;
+          }
+          rule.fontName = (fam[0] == "'" || fam[1] == '"'
+            ? fam.slice(1, -1).trim()
+            : fam
+          ).toLowerCase();
+          fontfaceRules.add(rule);
+          return;
+
+        case "@page":
+          if (!alsoIncludePageRules) {
+            rule.skip = true;
+            return;
+          }
+          break;
+
+        case "@media":
+          if (
+            !alsoIncludeAllMedias ||
+            !wndw.matchMedia(rule.prelude.condition).matches
+          ) {
+            rule.skip = true;
+            return;
+          }
+          break;
+
+        case "@import":
+          // TODO: consider media/layer/supports (rewrite the at-rule, basically)
+          rule.cssRule = getCSSRule(rule.toString());
+          rule.sheet = getUsableStylesheet(rule.cssRule.styleSheet);
+          rule.hasSubBlocks = true;
+          rule.rules = rule.sheet.blocks;
+          break;
+
+        default:
+          // TODO: alsoSkipAnimations
+          if (rule.prelude.type.match(keyframesRE)) {
+            rule.animationName = rule.prelude.condition;
+            keyframeRules.add(rule);
+            return;
+          }
+      }
+
+      if (rule.hasDeclarations && rule.selectors.length) {
+        rule.usedSelectors = rule.selectors.filter(sel =>
+          isSelectorUsedByDocument(sel.withoutPseudos, finalDocument, rule)
+        );
+      }
+
+      if (rule.hasSubBlocks) {
+        for (const subrule of rule.rules.filter(r => r instanceof Block)) {
+          processRulePhase1(subrule);
+        }
       }
     }
-    if (entity.selectors) {
-      for (const subEntity of entity.selectors) {
-        stripPseudos(subEntity);
+
+    function processRulePhase2(rule) {
+      if (rule.skip) {
+        return;
+      }
+
+      if ("fontName" in rule || "animationName" in rule) {
+        return;
+      }
+
+      if (rule.hasDeclarations && rule.selectors.length) {
+        if (rule.usedSelectors.length) {
+          if (fontfaceRules.size) {
+            const fdecl = rule
+              .getDeclarations(fontFamilyRE)
+              .pop()
+              ?.value.toLowerCase();
+            if (fdecl) {
+              for (const rule of fontfaceRules) {
+                if (fdecl.includes(rule.fontName)) {
+                  // TODO: using includes is bad
+                  rule.used = true;
+                  fontfaceRules.delete(rule); // perf optimization
+                }
+              }
+            }
+          }
+
+          if (keyframeRules.size) {
+            const adecl = rule
+              .getDeclarations(animationNameRE)
+              .pop()
+              ?.value.toLowerCase();
+            if (adecl) {
+              for (const rule of keyframeRules) {
+                if (adecl.includes(rule.animationName)) {
+                  // TODO: using includes is bad
+                  rule.used = true;
+                  keyframeRules.delete(rule); // perf optimization
+                }
+              }
+            }
+          }
+        }
+        return;
+      }
+
+      if (rule.hasSubBlocks) {
+        for (const subrule of rule.rules.filter(r => r instanceof Block)) {
+          processRulePhase2(subrule);
+        }
       }
     }
-    if (entity.rule) {
-      stripPseudos(entity.rule);
-    }
-  }
 
-  function filterCSSPseudos(cssSelector) {
-    if (!cssSelector) {
-      return undefined;
-    }
-    const parsed = SelectorParser.parse(cssSelector);
-    stripPseudos(parsed);
-    return SelectorParser.render(parsed);
-  }
+    function processRulePhase3(rule, finalRules) {
+      if (rule.skip) {
+        return;
+      }
 
-  class Rule {
-    constructor(rule, text, keyframeName, fontfaceName) {
-      const style = rule && rule.style || {};
-      this.style = new Proxy({}, {
-        get: (_, prop) => style[prop] || "",
+      rule.internalURLs?.forEach(url => {
+        referencedInternalLinks.add(url);
       });
-      this.text = text;
-      this.unused = false;
-      this.keyframeName = keyframeName;
-      this.fontfaceName = fontfaceName;
-    }
-  }
 
-  function getPotentiallyUsedRuleParts(rule, finalDocument) {
-    const filteredSelectorText = filterCSSPseudos(rule.selectorText);
-    if (!finalDocument.matches(filteredSelectorText) &&
-        !finalDocument.querySelector(filteredSelectorText)) {
-      return undefined;
-    }
+      if ("fontName" in rule || "animationName" in rule) {
+        if (rule.used) {
+          finalRules.push(rule.toString());
+        }
+        return;
+      }
 
-    const originalSelectors = rule.selectorText;
-    const restOfRule = rule.cssText.replace(originalSelectors, "");
-    const parsed = SelectorParser.parse(originalSelectors);
-    const matchingSelectors = [];
-    const candidateSelectors = parsed.selectors || [parsed];
-    for (const parsedSelector of candidateSelectors) {
-      const selector = SelectorParser.render(parsedSelector);
-      const filteredSelector = filterCSSPseudos(selector);
-      if (finalDocument.matches(filteredSelector) ||
-          finalDocument.querySelector(filteredSelector)) {
-        matchingSelectors.push(selector);
+      if (rule.hasDeclarations && rule.selectors.length) {
+        if (rule.usedSelectors.length) {
+          const finalSelectors = rule.usedSelectors.map(s => s.full).join(",");
+          const decls = rule.rules
+            .filter(r => r instanceof Declaration)
+            .join("\n");
+          finalRules.push(`${finalSelectors}{\n${decls}\n}`);
+        }
+      }
+
+      if (rule.hasSubBlocks) {
+        const finalSubRules = [];
+        for (const subrule of rule.rules.filter(r => r instanceof Block)) {
+          processRulePhase3(subrule, finalSubRules);
+        }
+        if (finalSubRules.length) {
+          finalRules.push(
+            `${rule.prelude.full}{\n${finalSubRules.join("\n")}\n}`
+          );
+        }
       }
     }
-    if (matchingSelectors.length) {
-      return `${matchingSelectors.join(", ")}${restOfRule}`;
-    }
-    return undefined;
-  }
 
-  function getSubruleMatches(rule, finalDocument) {
-    const matches = [];
-    for (const subrule of rule.cssRules) {
-      const finalCSSText = getPotentiallyUsedRuleParts(subrule, finalDocument);
-      if (finalCSSText) {
-        matches.push(fullyQualifyCSSUrls(finalCSSText));
-      }
-    }
-    return matches;
-  }
+    // first process the rules to figure out the font-faces and keyframes,
+    // and which rules are actually in-use in the final document.
 
-  const haveMozDocumentRule = !!window.CSSMozDocumentRule;
-
-  async function getCSSTextApplyingTo(wndw, sheets, finalDocument, alsoIncludeAllMedias,
-                                      alsoIncludeCSSFonts, alsoIncludePageRules) {
-    const candidateRules = [];
-    async function processRule(rule) {
-      if (rule instanceof CSSFontFaceRule) {
-        if (alsoIncludeCSSFonts) {
-          const family = rule.style.getPropertyValue("font-family");
-          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(rule.cssText),
-                                       undefined, family));
-        }
-      } else if (rule instanceof CSSImportRule) {
-        const sheet = await getUsableStylesheet(rule.styleSheet);
-        if (sheet) {
-          replaceCSSUrl.baseUrl = sheet.href;
-          for (const rule of sheet.cssRules) {
-            await processRule(rule);
-          }
-        }
-      } else if (rule instanceof CSSKeyframesRule) {
-        // We filter out the unused keyframes later, from the reduced rule set.
-        candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(rule.cssText),
-                                     rule.name));
-      } else if (rule instanceof CSSMediaRule) {
-        if (alsoIncludeAllMedias ||
-            wndw.matchMedia(rule.conditionText).matches) {
-          const matches = getSubruleMatches(rule, finalDocument);
-          if (matches.length) {
-            const finalRuleText = `@media ${rule.conditionText} {
-              ${matches.join("\n")}
-            }`;
-            candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalRuleText)));
-          }
-        }
-      } else if (haveMozDocumentRule && rule instanceof CSSMozDocumentRule) {
-        const matches = getSubruleMatches(rule, finalDocument);
-        if (matches.length) {
-          const finalRuleText = `@-moz-document ${rule.conditionText} {
-            ${matches.join("\n")}
-          }`;
-          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalRuleText)));
-        }
-      } else if (rule instanceof CSSNamespaceRule) {
-        candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(rule.cssText)));
-      } else if (rule instanceof CSSPageRule) {
-        if (alsoIncludePageRules) {
-          candidateRules.push(new Rule(rule, rule.cssText));
-        }
-      } else if (rule instanceof CSSSupportsRule) {
-        const matches = getSubruleMatches(rule, finalDocument);
-        if (matches.length) {
-          const finalRuleText = `@supports ${rule.conditionText} {
-            ${matches.join("\n")}
-          }`;
-          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalRuleText)));
-        }
-      } else if (rule instanceof CSSStyleRule) {
-        const finalCSSText = getPotentiallyUsedRuleParts(rule, finalDocument);
-        if (finalCSSText) {
-          candidateRules.push(new Rule(rule, fullyQualifyCSSUrls(finalCSSText)));
-        }
-      } else {
-        console.error(chrome.i18n.getMessage("errorUnexpectedCSSRule"), rule);
-      }
-    }
     for (const srcSheet of sheets) {
       const sheet = await getUsableStylesheet(srcSheet);
       if (sheet) {
-        replaceCSSUrl.baseUrl = sheet.baseUrl || sheet.href;
-        for (const rule of sheet.cssRules) {
-          await processRule(rule);
+        for (const rule of sheet.blocks) {
+          await processRulePhase1(rule);
         }
       }
     }
-    // Filter out any keyframes/fontfaces that aren't actually used by our matches.
-    for (const rule of candidateRules) {
-      const keyframe = rule.keyframeName;
-      const fontface = rule.fontfaceName;
-      if (keyframe === undefined && fontface === undefined) {
-        continue;
-      }
-      rule.unused = true;
-      if (keyframe) {
-        const keyframeRE = new RegExp(
-          `(^|,)\\s*${keyframe}\\s*(,|$)`, "i");
-        for (const candidate of candidateRules) {
-          if (candidate.style.animationName.match(keyframeRE)) {
-            rule.unused = false;
-            break;
-          }
-        }
-      } else if (fontface) {
-        const fontfaceRE = new RegExp(
-          `("${fontface}"|'${fontface}'|(^|,)\\s*${fontface}\\s*(,|$))`, "i");
-        for (const candidate of candidateRules) {
-          if (candidate.style.fontFamily.match(fontfaceRE)) {
-            rule.unused = false;
-            break;
+
+    // now go through the rules again, and find which font-names and keyframes
+    // are actually in-use.
+    if (fontfaceRules.size || keyframeRules.size) {
+      for (const srcSheet of sheets) {
+        const sheet = await getUsableStylesheet(srcSheet);
+        if (sheet) {
+          for (const rule of sheet.blocks) {
+            await processRulePhase2(rule);
           }
         }
       }
     }
 
-    return candidateRules.filter(r => !r.unused).map(r => r.text).join("\n");
+    // finally, gather up all of the in-use rules, including the fontfaces/keyframes.
+    const finalRules = [];
+    for (const srcSheet of sheets) {
+      const sheet = await getUsableStylesheet(srcSheet);
+      if (sheet) {
+        for (const rule of sheet.blocks) {
+          await processRulePhase3(rule, finalRules);
+        }
+      }
+    }
+
+    return finalRules.join("\n");
   }
 
   function doctypeToString(node) {
-    const {name, publicId, systemId} = node;
-    return "<!DOCTYPE " + name +
-             (publicId ? " PUBLIC \"" + publicId + "\"" : "") +
-             (!publicId && systemId ? " SYSTEM" : "") +
-             (systemId ? " \"" + systemId + '"' : "") + ">";
+    const { name, publicId, systemId } = node;
+    return (
+      "<!DOCTYPE " +
+      name +
+      (publicId ? ' PUBLIC "' + publicId + '"' : "") +
+      (!publicId && systemId ? " SYSTEM" : "") +
+      (systemId ? ' "' + systemId + '"' : "") +
+      ">"
+    );
   }
 
-  async function reduce(node, settings = {}) { // eslint-disable-line complexity
-    const {alsoIncludeAllMedias, alsoIncludeAncestors, alsoIncludeCSSFonts,
-           alsoIncludeMetas, alsoIncludePageRules, alsoIncludeScripts} = settings;
+  // eslint-disable-next-line complexity
+  async function reduce(node, settings = {}) {
+    try {
+      const {
+        alsoIncludeAllMedias,
+        alsoIncludeAncestors,
+        alsoIncludeCSSFonts,
+        alsoIncludeMetas,
+        alsoIncludePageRules,
+        alsoIncludeScripts,
+      } = settings;
 
-    function alsoConsider(node) {
-      const newFinalDocument = node.cloneNode(false);
-      newFinalDocument.appendChild(finalDocument);
-      finalDocument = newFinalDocument;
-      try {
-        finalDocument.prepend(document.createTextNode("\n"));
-        finalDocument.appendChild(document.createTextNode("\n"));
-      } catch (_) {
+      function alsoConsider(node) {
+        const newFinalDocument = node.cloneNode(false);
+        newFinalDocument.appendChild(finalDocument);
+        finalDocument = newFinalDocument;
+        try {
+          finalDocument.prepend(document.createTextNode("\n"));
+          finalDocument.appendChild(document.createTextNode("\n"));
+        } catch (_) {}
       }
-    }
 
-    function findOutermostUseElement(node) {
-      let outermost;
-      while (node) {
-        if (node instanceof SVGUseElement) {
-          outermost = node;
+      function findOutermostUseElement(node) {
+        let outermost;
+        while (node) {
+          if (node instanceof SVGUseElement) {
+            outermost = node;
+          }
+          node = node.parentNode;
+          if (node instanceof ShadowRoot) {
+            node = node.host;
+          }
         }
+        return outermost;
+      }
+
+      node = findOutermostUseElement(node) || node;
+
+      // If desired, we also consider the focused node's ancestors.
+      const topLevelHTMLWasSelected = node.parentNode instanceof Document;
+      let finalDocument = node.cloneNode(true);
+      while (!(node.parentNode instanceof Document)) {
         node = node.parentNode;
-        if (node instanceof ShadowRoot) {
+        if (node && node instanceof ShadowRoot) {
           node = node.host;
         }
+        if (
+          alsoIncludeAncestors ||
+          node instanceof HTMLBodyElement ||
+          node instanceof SVGSVGElement
+        ) {
+          alsoConsider(node);
+        }
       }
-      return outermost;
-    }
 
-    node = findOutermostUseElement(node) || node;
-
-    // If desired, we also consider the focused node's ancestors.
-    const topLevelHTMLWasSelected = node.parentNode instanceof Document;
-    let finalDocument = node.cloneNode(true);
-    while (!(node.parentNode instanceof Document)) {
-      node = node.parentNode;
-      if (node && node instanceof ShadowRoot) {
-        node = node.host;
-      }
-      if (alsoIncludeAncestors || (node instanceof HTMLBodyElement ||
-                                   node instanceof SVGSVGElement)) {
+      // node is now the <html> element, which we always need to consider and add.
+      const wndw = node.parentNode.defaultView;
+      const sheets = [].slice.call(node.parentNode.styleSheets || []);
+      if (!topLevelHTMLWasSelected) {
         alsoConsider(node);
       }
-    }
+      const doctypeNode = document.doctype;
+      const doctype = doctypeNode ? `${doctypeToString(doctypeNode)}\n` : "";
+      const viewport = {
+        width: wndw.innerWidth,
+        height: wndw.innerHeight,
+      };
 
-    // node is now the <html> element, which we always need to consider and add.
-    const wndw = node.parentNode.defaultView;
-    const sheets = [].slice.call(node.parentNode.styleSheets || []);
-    if (!topLevelHTMLWasSelected) {
-      alsoConsider(node);
-    }
-    const doctypeNode = document.doctype;
-    const doctype = doctypeNode ? `${doctypeToString(doctypeNode)}\n` : "";
-    const viewport = {
-      width: wndw.innerWidth,
-      height: wndw.innerHeight,
-    };
+      const mockUseInstances = [];
+      const usedDefs = [];
+      const memoizedUseReferences = new Map();
 
-    const mockUseInstances = [];
-    const usedDefs = [];
-    const memoizedUseReferences = new Map();
+      function isValidSVGUseReference(elem) {
+        if (memoizedUseReferences.has(elem)) {
+          return memoizedUseReferences.get(elem);
+        }
 
-    function isValidSVGUseReference(elem) {
-      if (memoizedUseReferences.has(elem)) {
-        return memoizedUseReferences.get(elem);
-      }
-
-      // As per https://www.w3.org/TR/SVG2/struct.html#UseElement,
-      // "If the referenced element that results from resolving the URL is neither
-      // an SVG element nor an HTML-namespaced element that may be included as a
-      // child of an SVG container element, then the reference is invalid"
-      if (!(elem instanceof SVGElement ||
+        // As per https://www.w3.org/TR/SVG2/struct.html#UseElement,
+        // "If the referenced element that results from resolving the URL is neither
+        // an SVG element nor an HTML-namespaced element that may be included as a
+        // child of an SVG container element, then the reference is invalid"
+        if (
+          !(
+            elem instanceof SVGElement ||
             elem instanceof HTMLVideoElement ||
             elem instanceof HTMLAudioElement ||
             elem instanceof HTMLIFrameElement ||
-            elem instanceof HTMLCanvasElement)) {
-        memoizedUseReferences.set(elem, false);
-        return false;
-      }
-
-      // "If the referenced element is a (shadow-including) ancestor of the ‘use’
-      // element, then this is an invalid circular reference"
-      while (elem) {
-        if (elem instanceof ShadowRoot) {
+            elem instanceof HTMLCanvasElement
+          )
+        ) {
           memoizedUseReferences.set(elem, false);
           return false;
         }
-        elem = elem.parentNode;
-      }
-      memoizedUseReferences.set(elem, true);
-      return true;
-    }
 
-    function mockInstantiateUseElement(use, addToList = true) {
-      if (!use.href) {
-        return;
-      }
-      const base = document.querySelector(use.href.baseVal);
-      const anim = document.querySelector(use.href.animVal);
-      if (base && isValidSVGUseReference(base)) {
-        usedDefs.push(base);
-        const inst = base.cloneNode(true);
-        if (addToList) {
-          mockUseInstances.push(inst);
+        // "If the referenced element is a (shadow-including) ancestor of the ‘use’
+        // element, then this is an invalid circular reference"
+        while (elem) {
+          if (elem instanceof ShadowRoot) {
+            memoizedUseReferences.set(elem, false);
+            return false;
+          }
+          elem = elem.parentNode;
         }
-        use.appendChild(inst);
+        memoizedUseReferences.set(elem, true);
+        return true;
       }
-      if (anim && anim !== base && isValidSVGUseReference(anim)) {
-        usedDefs.push(anim);
-        const inst = anim.cloneNode(true);
-        if (addToList) {
-          mockUseInstances.push(inst);
+
+      function mockInstantiateUseElement(use, addToList = true) {
+        if (!use.href) {
+          return;
         }
-        use.appendChild(inst);
+        const base = document.getElementById(use.href.baseVal.substr(1));
+        const anim = document.getElementById(use.href.animVal.substr(1));
+        if (base && isValidSVGUseReference(base)) {
+          usedDefs.push(base);
+          const inst = base.cloneNode(true);
+          if (addToList) {
+            mockUseInstances.push(inst);
+          }
+          use.appendChild(inst);
+        }
+        if (anim && anim !== base && isValidSVGUseReference(anim)) {
+          usedDefs.push(anim);
+          const inst = anim.cloneNode(true);
+          if (addToList) {
+            mockUseInstances.push(inst);
+          }
+          use.appendChild(inst);
+        }
+        for (const subuse of use.querySelectorAll("use")) {
+          mockInstantiateUseElement(subuse, false);
+        }
       }
-      for (const subuse of use.querySelectorAll("use")) {
-        mockInstantiateUseElement(subuse, false);
+
+      // Mock-instantiate use elements, so our CSS matcher can match them.
+      // Also note which <defs> they use.
+      for (const use of finalDocument.querySelectorAll("use")) {
+        mockInstantiateUseElement(use);
       }
-    }
 
-    // Mock-instantiate use elements, so our CSS matcher can match them.
-    // Also note which <defs> they use.
-    for (const use of finalDocument.querySelectorAll("use")) {
-      mockInstantiateUseElement(use);
-    }
+      // Put all CSS text matching the desired nodes into a <style> tag.
+      const css = `\n${await getCSSTextApplyingTo(
+        wndw,
+        sheets,
+        finalDocument,
+        alsoIncludeAllMedias,
+        alsoIncludeCSSFonts,
+        alsoIncludePageRules
+      )}\n`;
 
-    // Put all CSS text matching the desired nodes into a <style> tag.
-    const css = `\n${await getCSSTextApplyingTo(wndw, sheets, finalDocument,
-                                                alsoIncludeAllMedias,
-                                                alsoIncludeCSSFonts,
-                                                alsoIncludePageRules)}\n`;
+      // We no longer need the fake use instances, so remove them so they
+      // do not end up in our final "reduced" markup
+      for (const inst of mockUseInstances) {
+        inst.remove();
+      }
 
-    // We no longer need the fake use instances, so remove them so they
-    // do not end up in our final "reduced" markup
-    for (const inst of mockUseInstances) {
-      inst.remove();
-    }
+      // Filter out any <head>, <style> (and maybe <script>) tags we've dragged along.
+      const toFilter = alsoIncludeScripts
+        ? "head, style, link[rel=stylesheet]"
+        : "head, script, style, link[rel=stylesheet]";
+      for (const elem of finalDocument.querySelectorAll(toFilter)) {
+        elem.remove();
+      }
 
-    // Filter out any <head>, <style> (and maybe <script>) tags we've dragged along.
-    const toFilter = alsoIncludeScripts ? "head, style, link[rel=stylesheet]" :
-                                          "head, script, style, link[rel=stylesheet]";
-    for (const elem of finalDocument.querySelectorAll(toFilter)) {
-      elem.remove();
-    }
+      const head = document.createElement("head");
+      finalDocument.prepend(head);
+      finalDocument.prepend(document.createTextNode("\n"));
 
-    const head = document.createElement("head");
-    finalDocument.prepend(head);
-    finalDocument.prepend(document.createTextNode("\n"));
-
-    // Note any <defs> being used via SVG url() properties.
-    for (const attr of ["fill", "clip-path", "cursor", "filter", "marker-end",
-                        "marker-mid", "marker-start"]) {
-      for (const elem of document.querySelectorAll(`[${attr}]`)) {
-        const url = (elem.getAttribute(attr).match(/url\((.*)\)/) || [])[1];
-        if (url && url.startsWith("#") && elem instanceof SVGElement) {
-          const ref = document.querySelector(url);
-          if (ref) {
-            usedDefs.push(ref);
+      // Note any <defs> being used via SVG url() properties.
+      for (const attr of [
+        "fill",
+        "clip-path",
+        "cursor",
+        "filter",
+        "marker-end",
+        "marker-mid",
+        "marker-start",
+      ]) {
+        for (const elem of document.querySelectorAll(`[${attr}]`)) {
+          const url = (elem.getAttribute(attr).match(/url\((.*)\)/) || [])[1];
+          if (url && url.startsWith("#") && elem instanceof SVGElement) {
+            const ref = document.getElementById(url.substr(1));
+            if (ref) {
+              usedDefs.push(ref);
+            }
           }
         }
       }
-    }
-    // Note any <defs> being used via CSS clip-path URLs and the like.
-    for (const href of referencedInternalLinks) {
-      if (finalDocument.querySelector(href)) {
-        continue;
+      // Note any <defs> being used via CSS clip-path URLs and the like.
+      for (const href of referencedInternalLinks) {
+        if (finalDocument.querySelector(`[id="${href.substr(1)}"]`)) {
+          continue;
+        }
+        const src = document.getElementById(href);
+        if (src && src instanceof SVGElement) {
+          usedDefs.push(src);
+        }
       }
-      const src = document.querySelector(href);
-      if (src && src instanceof SVGElement) {
-        usedDefs.push(src);
-      }
-    }
 
-    // Copy over any <defs> that we need
-    if (usedDefs.length) {
-      const s = document.createElement("svg");
-      s.width = "0";
-      s.height = "0";
-      head.appendChild(s);
-      const d = document.createElement("defs");
-      s.appendChild(d);
-      for (const def of usedDefs) {
-        d.appendChild(def.cloneNode(true));
+      // Copy over any <defs> that we need
+      if (usedDefs.length) {
+        const s = document.createElement("svg");
+        s.width = "0";
+        s.height = "0";
+        head.appendChild(s);
+        const d = document.createElement("defs");
+        s.appendChild(d);
+        for (const def of usedDefs) {
+          d.appendChild(def.cloneNode(true));
+        }
       }
-    }
 
-    // Copy over any <meta> viewport, charset, or encoding directives.
-    if (alsoIncludeMetas) {
-      const metas = [].slice.call(document.querySelectorAll("head > meta"));
-      for (const meta of metas) {
-        if (meta.getAttribute("charset") ||
+      // Copy over any <meta> viewport, charset, or encoding directives.
+      if (alsoIncludeMetas) {
+        const metas = [].slice.call(document.querySelectorAll("head > meta"));
+        for (const meta of metas) {
+          if (
+            meta.getAttribute("charset") ||
             meta.getAttribute("http-equiv") === "Content-Type" ||
-            meta.getAttribute("name") === "viewport") {
-          head.appendChild(meta.cloneNode(false));
+            meta.getAttribute("name") === "viewport"
+          ) {
+            head.appendChild(meta.cloneNode(false));
+            head.appendChild(document.createTextNode("\n"));
+          }
+        }
+      }
+
+      // Add a UTF-8 charset if no encoding was specified.
+      if (!head.querySelector("meta[charset], meta[http-equiv=Content-Type")) {
+        const meta = document.createElement("meta");
+        meta.setAttribute("charset", "UTF-8");
+        head.appendChild(meta);
+        head.appendChild(document.createTextNode("\n"));
+      }
+
+      // Copy over any <script> tags, if desired.
+      if (alsoIncludeScripts) {
+        const scripts = [].slice.call(document.querySelectorAll("script"));
+        for (const script of scripts) {
+          head.appendChild(script.cloneNode(true));
           head.appendChild(document.createTextNode("\n"));
         }
       }
-    }
 
-    // Add a UTF-8 charset if no encoding was specified.
-    if (!head.querySelector("meta[charset], meta[http-equiv=Content-Type")) {
-      const meta = document.createElement("meta");
-      meta.setAttribute("charset", "UTF-8");
-      head.appendChild(meta);
+      // Add a <style> with the CSS text.
+      const style = document.createElement("style");
+      style.appendChild(document.createTextNode(css));
+      head.appendChild(style);
+      head.prepend(document.createTextNode("\n"));
       head.appendChild(document.createTextNode("\n"));
-    }
 
-    // Copy over any <script> tags, if desired.
-    if (alsoIncludeScripts) {
-      const scripts = [].slice.call(document.querySelectorAll("script"));
-      for (const script of scripts) {
-        head.appendChild(script.cloneNode(true));
-        head.appendChild(document.createTextNode("\n"));
+      // Fully-qualify all the URLs that we can.
+      for (const node of finalDocument.querySelectorAll("[srcset]")) {
+        node.setAttribute(
+          "srcset",
+          fullyQualifySrcSetURLs(node.getAttribute("srcset"))
+        );
       }
-    }
 
-    // Add a <style> with the CSS text.
-    const style = document.createElement("style");
-    style.appendChild(document.createTextNode(css));
-    head.appendChild(style);
-    head.prepend(document.createTextNode("\n"));
-    head.appendChild(document.createTextNode("\n"));
-
-    // Fully-qualify all the URLs that we can.
-    for (const node of finalDocument.querySelectorAll("[srcset]")) {
-      node.setAttribute("srcset", fullyQualifySrcSetURLs(node.getAttribute("srcset")));
-    }
-
-    for (const attr of ["action", "src", "href"]) {
-      for (const node of finalDocument.querySelectorAll(`:not(use)[${attr}]`)) {
-        node.setAttribute(attr, fullyQualifyURL(node.getAttribute(attr)));
+      for (const attr of ["action", "src", "href"]) {
+        for (const node of finalDocument.querySelectorAll(
+          `:not(use)[${attr}]`
+        )) {
+          node.setAttribute(attr, fullyQualifyURL(node.getAttribute(attr)));
+        }
       }
-    }
 
-    return {
-      html: `${doctype}${finalDocument.outerHTML}`,
-      url: location.href,
-      viewport,
-    };
+      return {
+        html: `${doctype}${finalDocument.outerHTML}`,
+        url: location.href,
+        viewport,
+      };
+    } catch (error) {
+      console.trace(error);
+      return { error };
+    }
   }
 
-  try {
-    return reduce(node, settings);
-  } catch (error) {
-    console.error(error);
-    return {error};
-  }
+  return reduce(node, settings);
 }

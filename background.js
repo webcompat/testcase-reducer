@@ -61,7 +61,7 @@ function ensureContentScriptInTabId(tabId, callback) {
 
     chrome.tabs.executeScript(tabId, {
       allFrames: true,
-      file: "css-selector-parser.js",
+      file: "reduceNode.js",
     }, () => {
       const error = chrome.runtime.lastError;
       if (error) {
@@ -70,23 +70,13 @@ function ensureContentScriptInTabId(tabId, callback) {
       }
       chrome.tabs.executeScript(tabId, {
         allFrames: true,
-        file: "reduceNode.js",
+        file: "content.js",
       }, () => {
-        const error = chrome.runtime.lastError;
         if (error) {
           callback(chrome.runtime.lastError.toString());
           return;
         }
-        chrome.tabs.executeScript(tabId, {
-          allFrames: true,
-          file: "content.js",
-        }, () => {
-          if (error) {
-            callback(chrome.runtime.lastError.toString());
-            return;
-          }
-          callback();
-        });
+        callback();
       });
     });
   });

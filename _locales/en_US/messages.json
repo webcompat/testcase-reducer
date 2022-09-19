@@ -61,5 +61,29 @@
   },
   "reducedTestCase": {
     "message": "Reduced test case for $1"
+  },
+  "invalidSelector": {
+    "message": "Testcase reducer could not match an invalid selector"
+  },
+  "unclosedBlock": {
+    "message": "Testcase Reducer found an unclosed block in a stylesheet"
+  },
+  "unclosedBrackets": {
+    "message": "Testcase Reducer found an unclosed []"
+  },
+  "unclosedComment": {
+    "message": "Testcase Reducer found an unclosed comment in a stylesheet"
+  },
+  "unclosedParentheses": {
+    "message": "Testcase Reducer found an unclosed ()"
+  },
+  "unclosedPseudo": {
+    "message": "Testcase Reducer found an unterminated pseudo in a stylesheet"
+  },
+  "unclosedString": {
+    "message": "Testcase Reducer found an unclosed string in a stylesheet"
+  },
+  "unparseableRule": {
+    "message": "Testcase Reducer found an unparsable rule"
   }
 }

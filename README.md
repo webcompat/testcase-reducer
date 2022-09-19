@@ -17,4 +17,3 @@ An addon helping to reduce test-cases from live pages.
 This addon makes use of the following third-party libraries:
 
 - JS Beautify by Einar Lielmanis, Liam Newman et al (https://github.com/beautify-web/js-beautify)
-- Node CSS Selector Parser by Dulin Marat (https://github.com/mdevils/node-css-selector-parser)
