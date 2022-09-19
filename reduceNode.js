@@ -862,7 +862,11 @@ function reduceNode(node, settings) {
         }
       }
 
-      // node is now the <html> element, which we always need to consider and add.
+      // node is now the <html> or equivalent element, which should always be considered.
+      if (finalDocument.nodeName !== node.nodeName) {
+        alsoConsider(node);
+      }
+
       const sheets = [].slice.call(doc.styleSheets);
       const doctypeNode = doc.doctype;
       const doctype = doctypeNode ? `${doctypeToString(doctypeNode)}\n` : "";
