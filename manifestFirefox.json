@@ -2,7 +2,7 @@
   "name": "__MSG_addonName__",
   "description": "__MSG_addonDescription__",
   "default_locale": "en_US",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "manifest_version": 2,
   "homepage_url": "https://github.com/webcompat/testcase-reducer",
   "applications": {     

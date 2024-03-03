@@ -97,7 +97,9 @@ class StylesheetParser {
     if (parens) {
       ptail = ptail.slice(1, -1);
     }
+    let quote = '"';
     if (ptail[0] == "'" || ptail[0] == '"') {
+      quote = ptail[0];
       ptail = ptail.slice(1, -1);
     }
     try {
@@ -105,7 +107,7 @@ class StylesheetParser {
       if (ptail.startsWith("#")) {
         block?.internalURLs?.add(url);
       } else {
-        url = `"${new URL(ptail, this.#baseUrl).href}"`;
+        url = `${quote}${new URL(ptail, this.#baseUrl).href}${quote}`;
       }
       return parens ? `(${url})` : url;
     } catch (_) {}
